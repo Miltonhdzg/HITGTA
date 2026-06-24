@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Consulta de Inventarios GTA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="home-screen" class="home-screen">
+        <div class="hero hero-home">
+          <p class="eyebrow">Menu principal</p>
+          <h1>HIT GTA</h1>
+        </div>
+
+        <section class="module-grid" aria-label="Modulos disponibles">
+          <button class="module-card" type="button" data-module-target="hit-gta-module">
+            <span class="module-kicker">Modulo 01</span>
+            <strong>HIT GTA</strong>
+            <span class="module-copy">Consulta inventario, captura piso de venta y envia sugeridos.</span>
+          </button>
+
+          <button class="module-card module-card-secondary" type="button" data-module-target="store-check-module">
+            <span class="module-kicker">Modulo 02</span>
+            <strong>Store Check</strong>
+            <span class="module-copy">Captura precio regular y precio promocion por producto.</span>
+          </button>
+        </section>
+      </section>
+
+      <section id="hit-gta-module" class="module-screen is-hidden">
+        <div class="module-topbar">
+          <button id="back-home-hit-gta" class="back-button" type="button">Inicio</button>
+          <span class="module-badge">HIT GTA</span>
+        </div>
+
+        <section class="hero">
+          <p class="eyebrow">Inventarios GTA</p>
+          <h1>HIT GTA</h1>
+        </section>
+
+        <section class="filters-card" aria-label="Filtros de consulta">
+          <div class="field">
+            <label for="promotor-select">Promotoria</label>
+            <select id="promotor-select">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="tienda-select">Nombre de la tienda</label>
+            <select id="tienda-select">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="familia-select">Familia</label>
+            <select id="familia-select">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="visit-date">Proxima visita</label>
+            <input id="visit-date" type="date" />
+          </div>
+        </section>
+
+        <section class="table-card">
+          <div class="table-header">
+            <div class="header-side header-side-left">
+              <button id="reset-filters" type="button">Limpiar filtros</button>
+            </div>
+            <div class="field ddi-field">
+              <label for="ddi-sugeridos">DDI Sugeridos</label>
+              <input id="ddi-sugeridos" type="number" min="0" step="1" inputmode="numeric" pattern="[0-9]*" />
+            </div>
+            <div class="header-side header-side-right">
+              <button id="send-data" type="button">Enviar</button>
+            </div>
+          </div>
+          <p id="submission-status" class="submission-status"></p>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Promedio venta dia</th>
+                  <th>Inventario en piso de venta</th>
+                  <th>Sugerido</th>
+                </tr>
+              </thead>
+              <tbody id="results-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="store-check-module" class="module-screen is-hidden">
+        <div class="module-topbar">
+          <button id="back-home-store-check" class="back-button" type="button">Inicio</button>
+          <span class="module-badge">Store Check</span>
+        </div>
+
+        <section class="hero hero-store-check">
+          <p class="eyebrow">Revision de precios</p>
+          <h1>Store Check</h1>
+        </section>
+
+        <section class="filters-card" aria-label="Filtros de Store Check">
+          <div class="field">
+            <label for="store-check-promotor-select">Promotoria</label>
+            <select id="store-check-promotor-select">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="store-check-tienda-select">Nombre de la tienda</label>
+            <select id="store-check-tienda-select">
+              <option value="">Todas</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="table-card">
+          <div class="table-header">
+            <div class="header-side header-side-left">
+              <span class="module-badge">Store Check</span>
+            </div>
+            <div class="header-side header-side-right">
+              <button id="store-check-reset-filters" type="button">Limpiar filtros</button>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th>Precio regular</th>
+                  <th>Precio promocion</th>
+                  <th>Oferta hasta</th>
+                </tr>
+              </thead>
+              <tbody id="store-check-results-body"></tbody>
+            </table>
+          </div>
+
+          <div class="store-check-footer">
+            <p id="store-check-results-copy" class="submission-status"></p>
+            <button id="store-check-load-more" class="store-check-load-more is-hidden" type="button">Mostrar mas</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="loading-overlay" class="loading-overlay is-hidden" aria-live="polite" aria-busy="true">
+      <div class="loading-dialog">
+        <p class="loading-kicker">Abriendo modulo</p>
+        <strong id="loading-title">Cargando</strong>
+        <div class="loading-bar">
+          <span id="loading-progress-bar"></span>
+        </div>
+        <p id="loading-progress-text" class="loading-progress-text">0%</p>
+      </div>
+    </div>
+
+    <div id="confirm-reset-overlay" class="confirm-overlay is-hidden" aria-live="assertive">
+      <div class="confirm-dialog">
+        <p class="loading-kicker">Advertencia</p>
+        <strong>¿Limpiar todos los filtros?</strong>
+        <p class="confirm-copy">
+          Se reiniciaran promotoria, tienda, familia, fecha de proxima visita y el valor de DDI sugeridos.
+        </p>
+        <div class="confirm-actions">
+          <button id="cancel-reset" class="confirm-button confirm-button-muted" type="button">Cancelar</button>
+          <button id="confirm-reset" class="confirm-button confirm-button-danger" type="button">Si, limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-send-overlay" class="confirm-overlay is-hidden" aria-live="assertive">
+      <div class="confirm-dialog">
+        <p class="loading-kicker">Confirmacion</p>
+        <strong>¿Enviar informacion a Inventario?</strong>
+        <p class="confirm-copy">
+          Se enviaran las filas visibles que tengan inventario capturado junto con la fecha de proxima visita seleccionada.
+        </p>
+        <div class="confirm-actions">
+          <button id="cancel-send" class="confirm-button confirm-button-muted" type="button">Cancelar</button>
+          <button id="confirm-send" class="confirm-button confirm-button-success" type="button">Si, enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <iframe id="submit-frame" name="submit-frame" class="hidden-frame"></iframe>
+    <form id="submit-form" method="post" target="submit-frame" class="hidden-form">
+      <input id="payload-input" name="payload" type="hidden" />
+    </form>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

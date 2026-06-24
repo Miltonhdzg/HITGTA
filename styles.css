@@ -335,6 +335,7 @@ input {
 }
 
 #send-data,
+#store-check-send-data,
 #reset-filters,
 #store-check-reset-filters {
   border: 0;
@@ -343,7 +344,8 @@ input {
   font-weight: 700;
 }
 
-#send-data {
+#send-data,
+#store-check-send-data {
   background: var(--brand);
   color: #fffdf8;
 }
@@ -412,6 +414,7 @@ input {
 }
 
 #send-data:disabled,
+#store-check-send-data:disabled,
 #reset-filters:disabled,
 #store-check-reset-filters:disabled {
   opacity: 0.6;
@@ -730,6 +733,7 @@ thead th:nth-child(3) {
   }
 
   #send-data,
+  #store-check-send-data,
   #reset-filters,
   #store-check-reset-filters {
     width: 100%;

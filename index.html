@@ -135,12 +135,13 @@
         <section class="table-card">
           <div class="table-header">
             <div class="header-side header-side-left">
-              <span class="module-badge">Store Check</span>
-            </div>
-            <div class="header-side header-side-right">
               <button id="store-check-reset-filters" type="button">Limpiar filtros</button>
             </div>
+            <div class="header-side header-side-right">
+              <button id="store-check-send-data" type="button">Enviar</button>
+            </div>
           </div>
+          <p id="store-check-submission-status" class="submission-status"></p>
 
           <div class="table-scroll">
             <table>
@@ -199,6 +200,20 @@
         <div class="confirm-actions">
           <button id="cancel-send" class="confirm-button confirm-button-muted" type="button">Cancelar</button>
           <button id="confirm-send" class="confirm-button confirm-button-success" type="button">Si, enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-store-check-send-overlay" class="confirm-overlay is-hidden" aria-live="assertive">
+      <div class="confirm-dialog">
+        <p class="loading-kicker">Confirmacion</p>
+        <strong>¿Enviar promociones a la hoja Promociones?</strong>
+        <p class="confirm-copy">
+          Se enviaran las filas visibles que tengan precios capturados junto con la fecha de oferta cuando exista.
+        </p>
+        <div class="confirm-actions">
+          <button id="cancel-store-check-send" class="confirm-button confirm-button-muted" type="button">Cancelar</button>
+          <button id="confirm-store-check-send" class="confirm-button confirm-button-success" type="button">Si, enviar</button>
         </div>
       </div>
     </div>

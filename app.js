@@ -3,7 +3,7 @@ const DATA_SOURCE = {
   url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SpyknHHgm6sGvWzKHWaven_gc_9H2HI_q-5jlhPfB9bHaxmlp_k_fjct3FyuH4J_R6z0ZIxyW3IE/pub?gid=0&single=true&output=csv",
 };
 
-const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxmAFVwDjix8FsLW2X-hXKnoiY_BFzsU8mKu42NvzIMt3RMwfFSZP1JnCbwcOrotOv7/exec";
+const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxkv6P9wHWRtY7_psFy5xzJlBaR4IiqQpomtsNdCrY3Wf13UE8eonkyIQ_8712W3ZIY/exec";
 const STORE_CHECK_PAGE_SIZE = 30;
 
 const COLUMN_MAP = {
@@ -46,6 +46,9 @@ const elements = {
   confirmSendOverlay: document.querySelector("#confirm-send-overlay"),
   cancelSendButton: document.querySelector("#cancel-send"),
   confirmSendButton: document.querySelector("#confirm-send"),
+  confirmStoreCheckSendOverlay: document.querySelector("#confirm-store-check-send-overlay"),
+  cancelStoreCheckSendButton: document.querySelector("#cancel-store-check-send"),
+  confirmStoreCheckSendButton: document.querySelector("#confirm-store-check-send"),
   promotoriaSelect: document.querySelector("#promotor-select"),
   tiendaSelect: document.querySelector("#tienda-select"),
   familiaSelect: document.querySelector("#familia-select"),
@@ -58,9 +61,11 @@ const elements = {
   storeCheckResultsCopy: document.querySelector("#store-check-results-copy"),
   storeCheckLoadMoreButton: document.querySelector("#store-check-load-more"),
   sendButton: document.querySelector("#send-data"),
+  storeCheckSendButton: document.querySelector("#store-check-send-data"),
   resetButton: document.querySelector("#reset-filters"),
   storeCheckResetButton: document.querySelector("#store-check-reset-filters"),
   submissionStatus: document.querySelector("#submission-status"),
+  storeCheckSubmissionStatus: document.querySelector("#store-check-submission-status"),
   submitForm: document.querySelector("#submit-form"),
   payloadInput: document.querySelector("#payload-input"),
   submitFrame: document.querySelector("#submit-frame"),
@@ -103,14 +108,18 @@ function bindEvents() {
   elements.ddiSugeridos.addEventListener("input", handleDdiInput);
   elements.resultsBody.addEventListener("input", handleTableInput);
   elements.storeCheckResultsBody.addEventListener("input", handleStoreCheckTableInput);
+  elements.storeCheckResultsBody.addEventListener("focusout", handleStoreCheckTableFocusOut);
   elements.storeCheckLoadMoreButton.addEventListener("click", loadMoreStoreCheckRows);
   elements.sendButton.addEventListener("click", openSendConfirmation);
+  elements.storeCheckSendButton.addEventListener("click", openStoreCheckSendConfirmation);
   elements.resetButton.addEventListener("click", openResetConfirmation);
   elements.storeCheckResetButton.addEventListener("click", resetStoreCheckFilters);
   elements.cancelResetButton.addEventListener("click", closeResetConfirmation);
   elements.confirmResetButton.addEventListener("click", confirmResetFilters);
   elements.cancelSendButton.addEventListener("click", closeSendConfirmation);
   elements.confirmSendButton.addEventListener("click", confirmSendInventoryData);
+  elements.cancelStoreCheckSendButton.addEventListener("click", closeStoreCheckSendConfirmation);
+  elements.confirmStoreCheckSendButton.addEventListener("click", confirmSendStoreCheckData);
   elements.submitFrame.addEventListener("load", handleSubmitFrameLoad);
 }
 
@@ -437,6 +446,19 @@ function confirmSendInventoryData() {
   submitInventoryData();
 }
 
+function openStoreCheckSendConfirmation() {
+  elements.confirmStoreCheckSendOverlay.classList.remove("is-hidden");
+}
+
+function closeStoreCheckSendConfirmation() {
+  elements.confirmStoreCheckSendOverlay.classList.add("is-hidden");
+}
+
+function confirmSendStoreCheckData() {
+  closeStoreCheckSendConfirmation();
+  submitStoreCheckData();
+}
+
 function populateSelect(select, values, emptyLabel) {
   select.innerHTML = "";
   select.append(new Option(emptyLabel, ""));
@@ -601,16 +623,14 @@ function handleStoreCheckTableInput(event) {
     target.value = sanitizeDecimalInput(target.value);
     if (target.getAttribute("aria-label")?.includes("regular")) {
       draft.regular = target.value;
-      validateStoreCheckPrices(row, draft);
+      if (draft.promo) {
+        validateStoreCheckPrices(row, draft);
+      }
     } else {
-      const previousPromoValue = draft.promo;
       draft.promo = target.value;
-      validateStoreCheckPrices(row, draft);
+      draft.offerDateActive = false;
       if (!draft.promo) {
         draft.offerUntil = "";
-      }
-      if (previousPromoValue !== draft.promo) {
-        updateOfferDateCell(row, draft);
       }
     }
     return;
@@ -619,6 +639,43 @@ function handleStoreCheckTableInput(event) {
   if (target.classList.contains("offer-date-input")) {
     draft.offerUntil = target.value;
   }
+}
+
+function handleStoreCheckTableFocusOut(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || !target.classList.contains("price-input")) {
+    return;
+  }
+
+  const row = target.closest("tr");
+  if (!(row instanceof HTMLTableRowElement)) {
+    return;
+  }
+
+  const rowKey = row.dataset.rowKey || "";
+  const draft = getStoreCheckDraftByKey(rowKey);
+
+  if (!target.getAttribute("aria-label")?.includes("promocion")) {
+    if (draft.promo) {
+      validateStoreCheckPrices(row, draft);
+      updateOfferDateCell(row, draft);
+    }
+    return;
+  }
+
+  if (!draft.promo) {
+    draft.offerDateActive = false;
+    draft.offerUntil = "";
+    updateOfferDateCell(row, draft);
+    return;
+  }
+
+  const isValid = validateStoreCheckPrices(row, draft);
+  draft.offerDateActive = isValid;
+  if (!isValid) {
+    draft.offerUntil = "";
+  }
+  updateOfferDateCell(row, draft);
 }
 
 function handleDdiInput(event) {
@@ -681,8 +738,7 @@ function toInteger(value) {
 function sanitizeDecimalInput(value) {
   if (!value) return "";
 
-  const normalized = value.replace(",", ".");
-  const cleaned = normalized.replace(/[^0-9.]/g, "");
+  const cleaned = value.replace(",", ".").replace(/[^0-9.]/g, "");
   const parts = cleaned.split(".");
   const integerPart = parts[0] ?? "";
   const decimalPart = (parts[1] ?? "").slice(0, 2);
@@ -713,6 +769,7 @@ function getStoreCheckDraftByKey(rowKey) {
       regular: "",
       promo: "",
       offerUntil: "",
+      offerDateActive: false,
     };
   }
 
@@ -721,7 +778,7 @@ function getStoreCheckDraftByKey(rowKey) {
 
 function renderOfferDateCell(row) {
   const draft = getStoreCheckDraft(row);
-  if (!draft.promo) {
+  if (!draft.offerDateActive) {
     return `<span class="offer-date-placeholder">Captura precio promocion</span>`;
   }
 
@@ -742,7 +799,7 @@ function updateOfferDateCell(rowElement, draft) {
     return;
   }
 
-  if (!draft.promo) {
+  if (!draft.offerDateActive) {
     offerDateCell.innerHTML = `<span class="offer-date-placeholder">Captura precio promocion</span>`;
     return;
   }
@@ -764,7 +821,7 @@ function validateStoreCheckPrices(rowElement, draft) {
   const promoInput = priceInputs[1];
 
   if (!(regularInput instanceof HTMLInputElement) || !(promoInput instanceof HTMLInputElement)) {
-    return;
+    return true;
   }
 
   const regularValue = Number.parseFloat(draft.regular);
@@ -776,11 +833,12 @@ function validateStoreCheckPrices(rowElement, draft) {
   promoInput.setCustomValidity(message);
   promoInput.classList.toggle("is-invalid", isInvalid);
 
-  if (!isInvalid) {
-    return;
+  if (isInvalid) {
+    promoInput.reportValidity();
+    return false;
   }
 
-  promoInput.reportValidity();
+  return true;
 }
 
 function submitInventoryData() {
@@ -801,10 +859,41 @@ function submitInventoryData() {
 
   state.isSubmitting = true;
   elements.sendButton.disabled = true;
-  elements.payloadInput.value = JSON.stringify({ rows: rowsToSubmit });
+  elements.payloadInput.value = JSON.stringify({ target: "inventario", rows: rowsToSubmit });
   elements.submitForm.action = APPS_SCRIPT_WEB_APP_URL;
   elements.submitForm.submit();
   setSubmissionStatus(`Enviando ${rowsToSubmit.length} registro(s)...`);
+}
+
+function submitStoreCheckData() {
+  if (state.isSubmitting) {
+    return;
+  }
+
+  if (!APPS_SCRIPT_WEB_APP_URL) {
+    setStoreCheckSubmissionStatus("Falta configurar la URL del Web App de Apps Script.", "error");
+    return;
+  }
+
+  const invalidPromoInput = elements.storeCheckResultsBody.querySelector(".price-input.is-invalid");
+  if (invalidPromoInput instanceof HTMLInputElement) {
+    invalidPromoInput.reportValidity();
+    setStoreCheckSubmissionStatus("Corrige los precios antes de enviar.", "error");
+    return;
+  }
+
+  const rowsToSubmit = collectStoreCheckRowsToSubmit();
+  if (!rowsToSubmit.length) {
+    setStoreCheckSubmissionStatus("Captura al menos un precio para poder enviar.", "error");
+    return;
+  }
+
+  state.isSubmitting = true;
+  elements.storeCheckSendButton.disabled = true;
+  elements.payloadInput.value = JSON.stringify({ target: "promociones", rows: rowsToSubmit });
+  elements.submitForm.action = APPS_SCRIPT_WEB_APP_URL;
+  elements.submitForm.submit();
+  setStoreCheckSubmissionStatus(`Enviando ${rowsToSubmit.length} promocion(es)...`);
 }
 
 function collectRowsToSubmit() {
@@ -845,6 +934,40 @@ function collectRowsToSubmit() {
   return rows;
 }
 
+function collectStoreCheckRowsToSubmit() {
+  const rows = [];
+
+  elements.storeCheckResultsBody.querySelectorAll("tr").forEach((rowElement) => {
+    if (!(rowElement instanceof HTMLTableRowElement)) {
+      return;
+    }
+
+    const rowKey = rowElement.dataset.rowKey || "";
+    const draft = getStoreCheckDraftByKey(rowKey);
+    const sourceRow = state.storeCheckRows.find((row) => getStoreCheckRowKey(row) === rowKey);
+    if (!sourceRow) {
+      return;
+    }
+
+    if (!draft.regular && !draft.promo && !draft.offerUntil) {
+      return;
+    }
+
+    rows.push({
+      Promotora: sourceRow.promotoria,
+      NumeroTienda: sourceRow.numeroTienda,
+      NombreTienda: sourceRow.tienda,
+      Descripcion: sourceRow.producto,
+      SKU: sourceRow.sku,
+      PrecioRegular: draft.regular,
+      PrecioOferta: draft.promo,
+      OfertaHasta: draft.offerUntil,
+    });
+  });
+
+  return rows;
+}
+
 function handleSubmitFrameLoad() {
   if (!state.isSubmitting) {
     return;
@@ -852,6 +975,14 @@ function handleSubmitFrameLoad() {
 
   state.isSubmitting = false;
   elements.sendButton.disabled = false;
+  elements.storeCheckSendButton.disabled = false;
+
+  const currentPayload = parseCurrentPayload();
+  if (currentPayload.target === "promociones") {
+    setStoreCheckSubmissionStatus("Informacion enviada a la hoja Promociones.", "success");
+    return;
+  }
+
   setSubmissionStatus("Informacion enviada a la hoja Inventario.", "success");
 }
 
@@ -865,5 +996,26 @@ function setSubmissionStatus(message, tone = "") {
 
   if (tone === "success") {
     elements.submissionStatus.classList.add("is-success");
+  }
+}
+
+function setStoreCheckSubmissionStatus(message, tone = "") {
+  elements.storeCheckSubmissionStatus.textContent = message;
+  elements.storeCheckSubmissionStatus.className = "submission-status";
+
+  if (tone === "error") {
+    elements.storeCheckSubmissionStatus.classList.add("is-error");
+  }
+
+  if (tone === "success") {
+    elements.storeCheckSubmissionStatus.classList.add("is-success");
+  }
+}
+
+function parseCurrentPayload() {
+  try {
+    return JSON.parse(elements.payloadInput.value || "{}");
+  } catch (error) {
+    return {};
   }
 }

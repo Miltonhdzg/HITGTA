@@ -99,3 +99,15 @@ const APPS_SCRIPT_WEB_APP_URL = "";
 - `DDI_Actuales` se guarda vacio.
 - `FechaPorxVisita` se toma del calendario seleccionado en la app.
 - Se envian solo las filas visibles donde `Inventario en piso de venta` tenga un valor capturado.
+
+## Envio a la hoja Promociones
+
+El modulo `Store Check` usa el mismo Web App de Apps Script, pero envia a una hoja distinta llamada `Promociones`.
+
+La fila 1 de esa hoja debe tener estos encabezados exactos:
+
+```text
+Fecha | Promotora | NumeroTienda | NombreTienda | Descripcion | SKU | PrecioRegular | PrecioOferta | OfertaHasta
+```
+
+La app enviara solo filas visibles donde haya por lo menos un precio o una fecha capturada.

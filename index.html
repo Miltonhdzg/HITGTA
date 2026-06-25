@@ -14,11 +14,55 @@
   </head>
   <body>
     <main class="app-shell">
+      <section id="login-screen" class="login-screen">
+        <div class="hero hero-login">
+          <p class="eyebrow">Acceso</p>
+          <h1>HIT GTA</h1>
+          <p class="hero-copy">Inicia sesion para consultar inventarios y capturar informacion.</p>
+        </div>
+
+        <section class="login-card" aria-label="Formulario de acceso">
+          <form id="login-form" class="login-form">
+            <div class="field">
+              <label for="login-user">Usuario</label>
+              <input id="login-user" name="user" type="text" autocomplete="username" required />
+            </div>
+
+            <div class="field">
+              <label for="login-password">Contrasena</label>
+              <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+            </div>
+
+            <button id="login-button" class="primary-action" type="submit">Entrar</button>
+            <p id="login-status" class="submission-status" aria-live="polite"></p>
+          </form>
+        </section>
+      </section>
+
+      <section id="session-bar" class="session-bar is-hidden" aria-label="Sesion activa">
+        <div class="session-summary">
+          <p id="session-user" class="session-user"></p>
+          <p id="session-role" class="session-role"></p>
+        </div>
+        <button id="logout-button" class="logout-button" type="button">Salir</button>
+      </section>
+
       <section id="home-screen" class="home-screen">
         <div class="hero hero-home">
           <p class="eyebrow">Menu principal</p>
           <h1>HIT GTA</h1>
         </div>
+
+        <section class="filters-card home-store-card" aria-label="Seleccion de tienda">
+          <div class="field">
+            <label for="home-store-select">Selecciona la tienda</label>
+            <select id="home-store-select">
+              <option value="">Elige una tienda</option>
+            </select>
+          </div>
+          <p class="home-store-helper">Primero elige tu tienda y despues entra al modulo que vas a capturar.</p>
+          <p id="home-selection-status" class="submission-status"></p>
+        </section>
 
         <section class="module-grid" aria-label="Modulos disponibles">
           <button class="module-card" type="button" data-module-target="hit-gta-module">
@@ -41,26 +85,14 @@
           <span class="module-badge">HIT GTA</span>
         </div>
 
-        <section class="hero">
-          <p class="eyebrow">Inventarios GTA</p>
-          <h1>HIT GTA</h1>
+        <section class="hero hero-module">
+          <div>
+            <p class="eyebrow">Inventarios GTA</p>
+            <h1>HIT GTA</h1>
+          </div>
         </section>
 
         <section class="filters-card" aria-label="Filtros de consulta">
-          <div class="field">
-            <label for="promotor-select">Promotoria</label>
-            <select id="promotor-select">
-              <option value="">Todas</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="tienda-select">Nombre de la tienda</label>
-            <select id="tienda-select">
-              <option value="">Todas</option>
-            </select>
-          </div>
-
           <div class="field">
             <label for="familia-select">Familia</label>
             <select id="familia-select">
@@ -94,8 +126,7 @@
               <thead>
                 <tr>
                   <th>Producto</th>
-                  <th>Promedio venta dia</th>
-                  <th>Inventario en piso de venta</th>
+                  <th>Inventario En Paquetes</th>
                   <th>Sugerido</th>
                 </tr>
               </thead>
@@ -111,24 +142,10 @@
           <span class="module-badge">Store Check</span>
         </div>
 
-        <section class="hero hero-store-check">
-          <p class="eyebrow">Revision de precios</p>
-          <h1>Store Check</h1>
-        </section>
-
-        <section class="filters-card" aria-label="Filtros de Store Check">
-          <div class="field">
-            <label for="store-check-promotor-select">Promotoria</label>
-            <select id="store-check-promotor-select">
-              <option value="">Todas</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <label for="store-check-tienda-select">Nombre de la tienda</label>
-            <select id="store-check-tienda-select">
-              <option value="">Todas</option>
-            </select>
+        <section class="hero hero-store-check hero-module">
+          <div>
+            <p class="eyebrow">Revision de precios</p>
+            <h1>Store Check</h1>
           </div>
         </section>
 
@@ -214,6 +231,25 @@
         <div class="confirm-actions">
           <button id="cancel-store-check-send" class="confirm-button confirm-button-muted" type="button">Cancelar</button>
           <button id="confirm-store-check-send" class="confirm-button confirm-button-success" type="button">Si, enviar</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="receipt-preview-overlay" class="confirm-overlay is-hidden" aria-live="polite">
+      <div class="receipt-dialog">
+        <div class="receipt-dialog-header">
+          <div>
+            <p class="loading-kicker">Comprobante</p>
+            <strong>Imagen lista para compartir</strong>
+          </div>
+          <button id="close-receipt-preview" class="confirm-button confirm-button-muted" type="button">Cerrar</button>
+        </div>
+        <div class="receipt-preview-frame">
+          <img id="receipt-preview-image" alt="Vista previa del comprobante generado" />
+        </div>
+        <div class="receipt-actions">
+          <button id="download-receipt" class="confirm-button confirm-button-success" type="button">Descargar imagen</button>
+          <button id="share-receipt" class="confirm-button confirm-button-muted" type="button">Compartir</button>
         </div>
       </div>
     </div>

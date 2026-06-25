@@ -3,8 +3,14 @@ const DATA_SOURCE = {
   url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SpyknHHgm6sGvWzKHWaven_gc_9H2HI_q-5jlhPfB9bHaxmlp_k_fjct3FyuH4J_R6z0ZIxyW3IE/pub?gid=0&single=true&output=csv",
 };
 
+const USERS_SOURCE = {
+  type: "csv",
+  url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SpyknHHgm6sGvWzKHWaven_gc_9H2HI_q-5jlhPfB9bHaxmlp_k_fjct3FyuH4J_R6z0ZIxyW3IE/pub?gid=113947866&single=true&output=csv",
+};
+
 const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxkv6P9wHWRtY7_psFy5xzJlBaR4IiqQpomtsNdCrY3Wf13UE8eonkyIQ_8712W3ZIY/exec";
 const STORE_CHECK_PAGE_SIZE = 30;
+const SESSION_STORAGE_KEY = "hit-gta-session";
 
 const COLUMN_MAP = {
   promotoria: ["Promotoria", "Promotor"],
@@ -20,15 +26,33 @@ const COLUMN_MAP = {
 
 const state = {
   rawRows: [],
+  users: [],
   filteredRows: [],
   storeCheckRows: [],
   storeCheckVisibleCount: STORE_CHECK_PAGE_SIZE,
   storeCheckDrafts: {},
+  authUser: null,
   isSubmitting: false,
+  isAuthenticating: false,
+  pendingInventoryReceipt: null,
+  receiptImageBlob: null,
+  receiptImageUrl: "",
   loadingTimer: 0,
 };
 
 const elements = {
+  loginScreen: document.querySelector("#login-screen"),
+  loginForm: document.querySelector("#login-form"),
+  loginUser: document.querySelector("#login-user"),
+  loginPassword: document.querySelector("#login-password"),
+  loginButton: document.querySelector("#login-button"),
+  loginStatus: document.querySelector("#login-status"),
+  sessionBar: document.querySelector("#session-bar"),
+  homeStoreSelect: document.querySelector("#home-store-select"),
+  homeSelectionStatus: document.querySelector("#home-selection-status"),
+  sessionUser: document.querySelector("#session-user"),
+  sessionRole: document.querySelector("#session-role"),
+  logoutButton: document.querySelector("#logout-button"),
   homeScreen: document.querySelector("#home-screen"),
   moduleScreens: document.querySelectorAll(".module-screen"),
   moduleButtons: document.querySelectorAll("[data-module-target]"),
@@ -49,11 +73,12 @@ const elements = {
   confirmStoreCheckSendOverlay: document.querySelector("#confirm-store-check-send-overlay"),
   cancelStoreCheckSendButton: document.querySelector("#cancel-store-check-send"),
   confirmStoreCheckSendButton: document.querySelector("#confirm-store-check-send"),
-  promotoriaSelect: document.querySelector("#promotor-select"),
-  tiendaSelect: document.querySelector("#tienda-select"),
+  receiptPreviewOverlay: document.querySelector("#receipt-preview-overlay"),
+  closeReceiptPreviewButton: document.querySelector("#close-receipt-preview"),
+  receiptPreviewImage: document.querySelector("#receipt-preview-image"),
+  downloadReceiptButton: document.querySelector("#download-receipt"),
+  shareReceiptButton: document.querySelector("#share-receipt"),
   familiaSelect: document.querySelector("#familia-select"),
-  storeCheckPromotoriaSelect: document.querySelector("#store-check-promotor-select"),
-  storeCheckTiendaSelect: document.querySelector("#store-check-tienda-select"),
   visitDate: document.querySelector("#visit-date"),
   ddiSugeridos: document.querySelector("#ddi-sugeridos"),
   resultsBody: document.querySelector("#results-body"),
@@ -76,34 +101,36 @@ boot();
 async function boot() {
   bindEvents();
   configureVisitDate();
-  showHomeScreen();
+  showLoginScreen();
 
   try {
-    const rows = await loadRows();
+    const [rows, users] = await Promise.all([loadRows(), loadUsers()]);
     state.rawRows = rows.map(normalizeRow).filter(isUsableRow);
+    state.users = users.map(normalizeUserRow).filter(isUsableUser);
     populateAllFilters();
     applyFilters();
     populateStoreCheckFilters();
     applyStoreCheckFilters();
+    restoreSession();
   } catch (error) {
     console.error(error);
+    setLoginStatus("No se pudieron cargar usuarios o registros.", "error");
     renderEmptyState("No se pudieron cargar registros.");
     renderStoreCheckEmptyState("No se pudieron cargar registros.");
   }
 }
 
 function bindEvents() {
+  elements.loginForm.addEventListener("submit", handleLoginSubmit);
+  elements.logoutButton.addEventListener("click", handleLogout);
   elements.moduleButtons.forEach((button) => {
     button.addEventListener("click", () => openModuleWithLoader(button.dataset.moduleTarget || "", button));
   });
 
   elements.backHomeHitGta.addEventListener("click", showHomeScreen);
   elements.backHomeStoreCheck.addEventListener("click", showHomeScreen);
-  elements.promotoriaSelect.addEventListener("change", handleFilterChange);
-  elements.tiendaSelect.addEventListener("change", handleFilterChange);
+  elements.homeStoreSelect.addEventListener("change", handleGlobalStoreChange);
   elements.familiaSelect.addEventListener("change", handleFilterChange);
-  elements.storeCheckPromotoriaSelect.addEventListener("change", handleStoreCheckFilterChange);
-  elements.storeCheckTiendaSelect.addEventListener("change", handleStoreCheckFilterChange);
   elements.visitDate.addEventListener("change", updateDdiSugeridos);
   elements.ddiSugeridos.addEventListener("input", handleDdiInput);
   elements.resultsBody.addEventListener("input", handleTableInput);
@@ -120,24 +147,57 @@ function bindEvents() {
   elements.confirmSendButton.addEventListener("click", confirmSendInventoryData);
   elements.cancelStoreCheckSendButton.addEventListener("click", closeStoreCheckSendConfirmation);
   elements.confirmStoreCheckSendButton.addEventListener("click", confirmSendStoreCheckData);
+  elements.closeReceiptPreviewButton.addEventListener("click", closeReceiptPreview);
+  elements.downloadReceiptButton.addEventListener("click", downloadReceiptImage);
+  elements.shareReceiptButton.addEventListener("click", shareReceiptImage);
   elements.submitFrame.addEventListener("load", handleSubmitFrameLoad);
 }
 
 function showHomeScreen() {
+  if (!state.authUser) {
+    showLoginScreen();
+    return;
+  }
+
+  elements.loginScreen.classList.add("is-hidden");
+  elements.sessionBar.classList.remove("is-hidden");
   elements.homeScreen.classList.remove("is-hidden");
   elements.moduleScreens.forEach((screen) => {
     screen.classList.add("is-hidden");
   });
+  updateModuleAvailability();
 }
 
 function showModule(moduleId) {
+  if (!state.authUser) {
+    showLoginScreen();
+    return;
+  }
+
+  elements.loginScreen.classList.add("is-hidden");
+  elements.sessionBar.classList.remove("is-hidden");
   elements.homeScreen.classList.add("is-hidden");
   elements.moduleScreens.forEach((screen) => {
     screen.classList.toggle("is-hidden", screen.id !== moduleId);
   });
 }
 
+function showLoginScreen() {
+  elements.loginScreen.classList.remove("is-hidden");
+  elements.sessionBar.classList.add("is-hidden");
+  elements.homeScreen.classList.add("is-hidden");
+  elements.moduleScreens.forEach((screen) => {
+    screen.classList.add("is-hidden");
+  });
+}
+
 function openModuleWithLoader(moduleId, button) {
+  if (!elements.homeStoreSelect.value) {
+    setHomeSelectionStatus("Selecciona una tienda antes de entrar al modulo.", "error");
+    return;
+  }
+
+  setHomeSelectionStatus("");
   const moduleName = button?.querySelector("strong")?.textContent?.trim() || "Modulo";
   startLoadingOverlay(moduleName);
 
@@ -184,11 +244,19 @@ function configureVisitDate() {
 }
 
 async function loadRows() {
-  if (DATA_SOURCE.type !== "csv") {
-    throw new Error(`Tipo de origen no soportado: ${DATA_SOURCE.type}`);
+  return loadCsvFromSource(DATA_SOURCE);
+}
+
+async function loadUsers() {
+  return loadCsvFromSource(USERS_SOURCE);
+}
+
+async function loadCsvFromSource(source) {
+  if (source.type !== "csv") {
+    throw new Error(`Tipo de origen no soportado: ${source.type}`);
   }
 
-  const response = await fetch(DATA_SOURCE.url);
+  const response = await fetch(source.url);
   if (!response.ok) {
     throw new Error(`Error cargando datos: ${response.status}`);
   }
@@ -215,10 +283,35 @@ function isUsableRow(row) {
   return row.tienda && row.producto;
 }
 
+function normalizeUserRow(row) {
+  return {
+    displayName: pickValue(row, ["Promotora", "Nombre", "Nombre completo", "DisplayName"]),
+    role: pickValue(row, ["roll", "rol", "role"]),
+    username: pickValue(row, ["user", "usuario", "username"]),
+    password: pickValue(row, ["contraseña", "contrasena", "password"]),
+    passwordHash: pickValue(row, ["password_hash", "passwordHash", "hash"]).toLowerCase(),
+  };
+}
+
+function isUsableUser(user) {
+  return user.username && (user.password || user.passwordHash);
+}
+
 function populateAllFilters() {
-  populateSelect(elements.promotoriaSelect, uniqueValues(state.rawRows, "promotoria"), "Todas");
-  populateSelect(elements.tiendaSelect, uniqueValues(state.rawRows, "tienda"), "Todas");
-  populateSelect(elements.familiaSelect, uniqueValues(state.rawRows, "familia"), "Todas");
+  const availableRows = getRowsForCurrentScope();
+  const currentStore = elements.homeStoreSelect.value;
+  repopulateSelectWithLabel(elements.homeStoreSelect, uniqueValues(availableRows, "tienda"), currentStore, "Elige una tienda");
+  populateSelect(elements.familiaSelect, uniqueValues(availableRows, "familia"), "Todas");
+}
+
+function handleGlobalStoreChange() {
+  populateAllFilters();
+  populateStoreCheckFilters();
+  syncFilterOptions();
+  applyFilters();
+  applyStoreCheckFilters();
+  setHomeSelectionStatus("");
+  updateModuleAvailability();
 }
 
 function handleFilterChange() {
@@ -226,29 +319,12 @@ function handleFilterChange() {
   applyFilters();
 }
 
-function handleStoreCheckFilterChange() {
-  state.storeCheckVisibleCount = STORE_CHECK_PAGE_SIZE;
-  syncStoreCheckFilterOptions();
-  applyStoreCheckFilters();
-}
-
 function syncFilterOptions() {
   const current = getSelectedFilters();
-  const filteredForPromotoria = filterRows({
-    tienda: current.tienda,
-    familia: current.familia,
-  });
-  const filteredForTienda = filterRows({
-    promotoria: current.promotoria,
-    familia: current.familia,
-  });
   const filteredForFamilia = filterRows({
-    promotoria: current.promotoria,
     tienda: current.tienda,
   });
 
-  repopulateSelect(elements.promotoriaSelect, uniqueValues(filteredForPromotoria, "promotoria"), current.promotoria);
-  repopulateSelect(elements.tiendaSelect, uniqueValues(filteredForTienda, "tienda"), current.tienda);
   repopulateSelect(elements.familiaSelect, uniqueValues(filteredForFamilia, "familia"), current.familia);
 }
 
@@ -265,8 +341,10 @@ function applyStoreCheckFilters() {
 }
 
 function filterRows(filters) {
+  const scopedPromotoria = getCurrentPromotoriaScope();
+
   return state.rawRows.filter((row) => {
-    if (filters.promotoria && row.promotoria !== filters.promotoria) return false;
+    if (scopedPromotoria && row.promotoria !== scopedPromotoria) return false;
     if (filters.tienda && row.tienda !== filters.tienda) return false;
     if (filters.familia && row.familia !== filters.familia) return false;
     return true;
@@ -274,29 +352,11 @@ function filterRows(filters) {
 }
 
 function populateStoreCheckFilters() {
-  populateSelect(elements.storeCheckPromotoriaSelect, uniqueValues(state.rawRows, "promotoria"), "Todas");
-  populateSelect(elements.storeCheckTiendaSelect, uniqueValues(state.rawRows, "tienda"), "Todas");
+  state.storeCheckVisibleCount = STORE_CHECK_PAGE_SIZE;
 }
 
 function syncStoreCheckFilterOptions() {
-  const current = getStoreCheckSelectedFilters();
-  const filteredForPromotoria = filterRows({
-    tienda: current.tienda,
-  });
-  const filteredForTienda = filterRows({
-    promotoria: current.promotoria,
-  });
-
-  repopulateSelect(
-    elements.storeCheckPromotoriaSelect,
-    uniqueValues(filteredForPromotoria, "promotoria"),
-    current.promotoria,
-  );
-  repopulateSelect(
-    elements.storeCheckTiendaSelect,
-    uniqueValues(filteredForTienda, "tienda"),
-    current.tienda,
-  );
+  state.storeCheckVisibleCount = STORE_CHECK_PAGE_SIZE;
 }
 
 function renderTable(rows) {
@@ -315,9 +375,8 @@ function renderTable(rows) {
           data-sku="${escapeHtml(row.sku)}"
           data-producto="${escapeHtml(row.producto)}"
         >
-          <td>${escapeHtml(row.producto)}</td>
-          <td><span class="metric-pill" data-average-value="${row.ventaPromedioDia.toFixed(2)}">${row.ventaPromedioDia.toFixed(2)}</span></td>
-          <td>
+          <td data-label="Producto">${escapeHtml(row.producto)}</td>
+          <td data-label="Inventario En Paquetes">
             <input
               class="inventory-input"
               type="number"
@@ -328,8 +387,18 @@ function renderTable(rows) {
               aria-label="Inventario en piso de venta para ${escapeHtml(row.producto)}"
             />
           </td>
-          <td>
-            <span class="suggested-pill" data-suggested-value data-case-pack="${row.casePack}" data-shelf-space="${row.espacioAnaquel}">${calculateSuggestedValue(row.ventaPromedioDia, row.casePack, row.espacioAnaquel, 0)}</span>
+          <td data-label="Sugerido"><span class="metric-pill is-hidden" data-average-value="${row.ventaPromedioDia.toFixed(2)}"></span>
+            <input
+              class="suggested-input"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              value="${calculateSuggestedValue(row.ventaPromedioDia, row.casePack, row.espacioAnaquel, 0)}"
+              data-suggested-value
+              data-case-pack="${row.casePack}"
+              data-shelf-space="${row.espacioAnaquel}"
+              aria-label="Sugerido para ${escapeHtml(row.producto)}"
+            />
           </td>
         </tr>
       `,
@@ -340,7 +409,7 @@ function renderTable(rows) {
 function renderEmptyState(message) {
   elements.resultsBody.innerHTML = `
     <tr class="empty-state">
-      <td colspan="4">${escapeHtml(message)}</td>
+      <td colspan="3">${escapeHtml(message)}</td>
     </tr>
   `;
 }
@@ -357,8 +426,8 @@ function renderStoreCheckTable(rows) {
     .map(
       (row) => `
         <tr data-row-key="${escapeHtml(getStoreCheckRowKey(row))}">
-          <td>${escapeHtml(row.producto)}</td>
-          <td>
+          <td data-label="Producto">${escapeHtml(row.producto)}</td>
+          <td data-label="Precio regular">
             <input
               class="price-input"
               type="text"
@@ -369,7 +438,7 @@ function renderStoreCheckTable(rows) {
               aria-label="Precio regular para ${escapeHtml(row.producto)}"
             />
           </td>
-          <td>
+          <td data-label="Precio promocion">
             <input
               class="price-input"
               type="text"
@@ -380,7 +449,7 @@ function renderStoreCheckTable(rows) {
               aria-label="Precio promocion para ${escapeHtml(row.producto)}"
             />
           </td>
-          <td>
+          <td data-label="Oferta hasta">
             ${renderOfferDateCell(row)}
           </td>
         </tr>
@@ -403,20 +472,18 @@ function renderStoreCheckEmptyState(message) {
 }
 
 function resetFilters() {
-  elements.promotoriaSelect.value = "";
-  elements.tiendaSelect.value = "";
   elements.familiaSelect.value = "";
   configureVisitDate();
   populateAllFilters();
+  applyRoleConstraints();
   applyFilters();
   setSubmissionStatus("");
 }
 
 function resetStoreCheckFilters() {
-  elements.storeCheckPromotoriaSelect.value = "";
-  elements.storeCheckTiendaSelect.value = "";
   state.storeCheckVisibleCount = STORE_CHECK_PAGE_SIZE;
   populateStoreCheckFilters();
+  applyRoleConstraints();
   applyStoreCheckFilters();
 }
 
@@ -473,6 +540,11 @@ function repopulateSelect(select, values, selectedValue) {
   select.value = values.includes(selectedValue) ? selectedValue : "";
 }
 
+function repopulateSelectWithLabel(select, values, selectedValue, emptyLabel) {
+  populateSelect(select, values, emptyLabel);
+  select.value = values.includes(selectedValue) ? selectedValue : "";
+}
+
 function uniqueValues(rows, key) {
   return [...new Set(rows.map((row) => row[key]).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, "es"),
@@ -481,22 +553,214 @@ function uniqueValues(rows, key) {
 
 function getSelectedFilters() {
   return {
-    promotoria: elements.promotoriaSelect.value,
-    tienda: elements.tiendaSelect.value,
+    tienda: elements.homeStoreSelect.value,
     familia: elements.familiaSelect.value,
   };
 }
 
 function getStoreCheckSelectedFilters() {
   return {
-    promotoria: elements.storeCheckPromotoriaSelect.value,
-    tienda: elements.storeCheckTiendaSelect.value,
+    tienda: elements.homeStoreSelect.value,
   };
 }
 
 function pickValue(row, candidates) {
   const key = Object.keys(row).find((columnName) => candidates.includes(columnName.trim()));
   return (key ? row[key] : "").toString().trim();
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+
+  if (state.isAuthenticating) {
+    return;
+  }
+
+  const username = elements.loginUser.value.trim();
+  const password = elements.loginPassword.value;
+
+  if (!username || !password) {
+    setLoginStatus("Captura usuario y contrasena.", "error");
+    return;
+  }
+
+  const matchedUser = state.users.find((user) => normalizeText(user.username) === normalizeText(username));
+  if (!matchedUser) {
+    setLoginStatus("Usuario o contrasena incorrectos.", "error");
+    return;
+  }
+
+  state.isAuthenticating = true;
+  elements.loginButton.disabled = true;
+  setLoginStatus("Validando acceso...");
+
+  try {
+    const isValid = await verifyPassword(matchedUser, password);
+    if (!isValid) {
+      setLoginStatus("Usuario o contrasena incorrectos.", "error");
+      return;
+    }
+
+    setAuthenticatedUser(matchedUser);
+    elements.loginForm.reset();
+    setLoginStatus("");
+  } catch (error) {
+    console.error(error);
+    setLoginStatus("No se pudo validar el acceso.", "error");
+  } finally {
+    state.isAuthenticating = false;
+    elements.loginButton.disabled = false;
+  }
+}
+
+function handleLogout() {
+  state.authUser = null;
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  resetReceiptAsset();
+  setLoginStatus("");
+  showLoginScreen();
+}
+
+async function verifyPassword(user, inputPassword) {
+  if (user.passwordHash) {
+    const hashedInput = await sha256Hex(inputPassword);
+    return hashedInput === user.passwordHash;
+  }
+
+  return user.password === inputPassword;
+}
+
+async function sha256Hex(value) {
+  const encodedValue = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encodedValue);
+  return [...new Uint8Array(hashBuffer)].map((chunk) => chunk.toString(16).padStart(2, "0")).join("");
+}
+
+function setAuthenticatedUser(user) {
+  state.authUser = {
+    displayName: user.displayName || user.username,
+    role: user.role || "usuario",
+    username: user.username,
+  };
+
+  sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state.authUser));
+  updateSessionBar();
+  resetFilters();
+  resetStoreCheckFilters();
+  showHomeScreen();
+}
+
+function restoreSession() {
+  const rawSession = sessionStorage.getItem(SESSION_STORAGE_KEY);
+  if (!rawSession) {
+    return;
+  }
+
+  try {
+    const session = JSON.parse(rawSession);
+    const matchedUser = state.users.find((user) => normalizeText(user.username) === normalizeText(session.username));
+    if (!matchedUser) {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      return;
+    }
+
+    state.authUser = {
+      displayName: matchedUser.displayName || matchedUser.username,
+      role: matchedUser.role || "usuario",
+      username: matchedUser.username,
+    };
+    updateSessionBar();
+    resetFilters();
+    resetStoreCheckFilters();
+    showHomeScreen();
+  } catch (error) {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+}
+
+function updateSessionBar() {
+  if (!state.authUser) {
+    elements.sessionUser.textContent = "";
+    elements.sessionRole.textContent = "";
+    return;
+  }
+
+  elements.sessionUser.textContent = state.authUser.displayName;
+  elements.sessionRole.textContent = `Rol: ${state.authUser.role}`;
+}
+
+function setLoginStatus(message, tone = "") {
+  elements.loginStatus.textContent = message;
+  elements.loginStatus.className = "submission-status";
+
+  if (tone === "error") {
+    elements.loginStatus.classList.add("is-error");
+  }
+
+  if (tone === "success") {
+    elements.loginStatus.classList.add("is-success");
+  }
+}
+
+function setHomeSelectionStatus(message, tone = "") {
+  elements.homeSelectionStatus.textContent = message;
+  elements.homeSelectionStatus.className = "submission-status";
+
+  if (tone === "error") {
+    elements.homeSelectionStatus.classList.add("is-error");
+  }
+
+  if (tone === "success") {
+    elements.homeSelectionStatus.classList.add("is-success");
+  }
+}
+
+function updateModuleAvailability() {
+  const hasSelectedStore = Boolean(elements.homeStoreSelect.value);
+
+  elements.moduleButtons.forEach((button) => {
+    button.disabled = !hasSelectedStore;
+    button.classList.toggle("is-disabled", !hasSelectedStore);
+  });
+}
+
+function normalizeText(value) {
+  return (value || "")
+    .toString()
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function applyRoleConstraints() {
+  syncFilterOptions();
+  applyFilters();
+  syncStoreCheckFilterOptions();
+  applyStoreCheckFilters();
+}
+
+function findPromotoriaForUser(displayName) {
+  return uniqueValues(state.rawRows, "promotoria").find(
+    (promotoria) => normalizeText(promotoria) === normalizeText(displayName),
+  ) || "";
+}
+
+function getCurrentPromotoriaScope() {
+  if (normalizeText(state.authUser?.role) !== "promotora") {
+    return "";
+  }
+
+  return findPromotoriaForUser(state.authUser?.displayName || "");
+}
+
+function getRowsForCurrentScope() {
+  const promotoria = getCurrentPromotoriaScope();
+  if (!promotoria) {
+    return state.rawRows;
+  }
+
+  return state.rawRows.filter((row) => row.promotoria === promotoria);
 }
 
 function toNumber(value) {
@@ -577,6 +841,46 @@ function formatDateForInput(date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatReceiptDate(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) {
+    return value;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
+function formatReceiptDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+function formatDateForFileName(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}${month}${day}-${hours}${minutes}`;
+}
+
 function updateDdiSugeridos() {
   const selectedDate = elements.visitDate.value;
   if (!selectedDate) {
@@ -598,7 +902,17 @@ function updateDdiSugeridos() {
 
 function handleTableInput(event) {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement) || !target.classList.contains("inventory-input")) {
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+
+  if (target.classList.contains("suggested-input")) {
+    target.value = target.value.replace(/[^0-9]/g, "");
+    target.dataset.manualOverride = "true";
+    return;
+  }
+
+  if (!target.classList.contains("inventory-input")) {
     return;
   }
 
@@ -714,7 +1028,11 @@ function updateSuggestedValueForRow(rowElement) {
   const casePackValue = toNumber(suggestedOutput.dataset.casePack);
   const shelfSpaceValue = toNumber(suggestedOutput.dataset.shelfSpace);
   const inventoryValue = toInteger(inventoryInput.value);
-  suggestedOutput.textContent = calculateSuggestedValue(averageValue, casePackValue, shelfSpaceValue, inventoryValue);
+  if (suggestedOutput.dataset.manualOverride === "true") {
+    return;
+  }
+
+  suggestedOutput.value = calculateSuggestedValue(averageValue, casePackValue, shelfSpaceValue, inventoryValue);
 }
 
 function calculateSuggestedValue(averageValue, casePackValue, shelfSpaceValue, inventoryValue) {
@@ -857,6 +1175,7 @@ function submitInventoryData() {
     return;
   }
 
+  state.pendingInventoryReceipt = buildInventoryReceiptModel(rowsToSubmit);
   state.isSubmitting = true;
   elements.sendButton.disabled = true;
   elements.payloadInput.value = JSON.stringify({ target: "inventario", rows: rowsToSubmit });
@@ -889,6 +1208,7 @@ function submitStoreCheckData() {
   }
 
   state.isSubmitting = true;
+  state.pendingInventoryReceipt = null;
   elements.storeCheckSendButton.disabled = true;
   elements.payloadInput.value = JSON.stringify({ target: "promociones", rows: rowsToSubmit });
   elements.submitForm.action = APPS_SCRIPT_WEB_APP_URL;
@@ -926,7 +1246,7 @@ function collectRowsToSubmit() {
       AVG_Vta_diario: averageOutput.dataset.averageValue ?? "0",
       Inventario: String(toInteger(inventoryRawValue)),
       DDI_Actuales: "",
-      Cajas_Sugueridas: suggestedOutput.textContent?.trim() ?? "0",
+      Cajas_Sugueridas: suggestedOutput.value?.trim() ?? "0",
       FechaPorxVisita: elements.visitDate.value || "",
     });
   });
@@ -968,7 +1288,270 @@ function collectStoreCheckRowsToSubmit() {
   return rows;
 }
 
-function handleSubmitFrameLoad() {
+function buildInventoryReceiptModel(rows) {
+  const submittedAt = new Date();
+
+  return {
+    submittedAtIso: submittedAt.toISOString(),
+    promotora: state.authUser?.displayName || rows[0]?.Promotora || "",
+    tienda: elements.homeStoreSelect.value || rows[0]?.Nombre_Tienda || "",
+    nextVisit: elements.visitDate.value || "",
+    rows: rows.map((row) => ({
+      producto: row.Nombre_Producto || "",
+      inventario: row.Inventario || "0",
+      sugeridas: row.Cajas_Sugueridas || "0",
+    })),
+  };
+}
+
+async function openInventoryReceiptPreview(receipt) {
+  const asset = await createInventoryReceiptAsset(receipt);
+  resetReceiptAsset();
+  state.receiptImageBlob = asset.blob;
+  state.receiptImageUrl = asset.url;
+  elements.receiptPreviewImage.src = asset.url;
+  elements.receiptPreviewOverlay.classList.remove("is-hidden");
+  updateReceiptShareAvailability();
+}
+
+function closeReceiptPreview() {
+  elements.receiptPreviewOverlay.classList.add("is-hidden");
+}
+
+function resetReceiptAsset() {
+  if (state.receiptImageUrl) {
+    URL.revokeObjectURL(state.receiptImageUrl);
+  }
+
+  state.receiptImageBlob = null;
+  state.receiptImageUrl = "";
+  elements.receiptPreviewImage.removeAttribute("src");
+  closeReceiptPreview();
+}
+
+function updateReceiptShareAvailability() {
+  const canShareFiles = Boolean(
+    state.receiptImageBlob &&
+      navigator.share &&
+      navigator.canShare &&
+      navigator.canShare({
+        files: [new File([state.receiptImageBlob], "comprobante-hit-gta.png", { type: "image/png" })],
+      }),
+  );
+
+  elements.shareReceiptButton.classList.toggle("is-hidden", !canShareFiles);
+}
+
+function downloadReceiptImage() {
+  if (!state.receiptImageUrl) {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.href = state.receiptImageUrl;
+  link.download = `comprobante-hit-gta-${formatDateForFileName(new Date())}.png`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+async function shareReceiptImage() {
+  if (!state.receiptImageBlob || !navigator.share || !navigator.canShare) {
+    return;
+  }
+
+  const receiptFile = new File([state.receiptImageBlob], "comprobante-hit-gta.png", { type: "image/png" });
+  if (!navigator.canShare({ files: [receiptFile] })) {
+    return;
+  }
+
+  try {
+    await navigator.share({ files: [receiptFile] });
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      console.error(error);
+    }
+  }
+}
+
+async function createInventoryReceiptAsset(receipt) {
+  const width = 1080;
+  const outerPadding = 56;
+  const cardPadding = 46;
+  const headerHeight = 168;
+  const detailsBlockHeight = 196;
+  const tableHeaderHeight = 58;
+  const rowHeight = 54;
+  const footerHeight = 110;
+  const contentWidth = width - outerPadding * 2;
+  const visibleRows = receipt.rows;
+  const height =
+    outerPadding * 2 +
+    headerHeight +
+    24 +
+    detailsBlockHeight +
+    24 +
+    tableHeaderHeight +
+    visibleRows.length * rowHeight +
+    footerHeight;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("No se pudo crear el comprobante.");
+  }
+
+  drawReceiptBackground(context, width, height);
+
+  let y = outerPadding;
+  drawRoundedRect(context, outerPadding, y, contentWidth, headerHeight, 34, "#0f766e");
+  context.fillStyle = "#fffdf8";
+  context.font = '700 52px "Barlow", sans-serif';
+  context.fillText("HIT GTA", outerPadding + cardPadding, y + 72);
+  context.font = '500 28px "Barlow", sans-serif';
+  context.fillStyle = "rgba(255, 253, 248, 0.88)";
+  context.fillText("Comprobante de envio", outerPadding + cardPadding, y + 114);
+
+  y += headerHeight + 24;
+  drawRoundedRect(context, outerPadding, y, contentWidth, detailsBlockHeight, 30, "#fffdf9");
+  drawDetailsGrid(context, receipt, outerPadding + cardPadding, y + 42, contentWidth - cardPadding * 2);
+
+  y += detailsBlockHeight + 24;
+  const productColumnWidth = contentWidth - 280;
+  const inventoryColumnWidth = 132;
+  const suggestedColumnWidth = 148;
+
+  drawRoundedRect(context, outerPadding, y, contentWidth, tableHeaderHeight, 24, "rgba(15, 118, 110, 0.12)");
+  context.fillStyle = "#0b5d57";
+  context.font = '700 24px "Barlow", sans-serif';
+  context.fillText("Producto", outerPadding + 28, y + 37);
+  context.fillText("Inventario", outerPadding + 28 + productColumnWidth, y + 37);
+  context.fillText("Cajas sugeridas", outerPadding + 28 + productColumnWidth + inventoryColumnWidth, y + 37);
+
+  y += tableHeaderHeight;
+  visibleRows.forEach((row, index) => {
+    const rowY = y + index * rowHeight;
+    if (index % 2 === 0) {
+      drawRoundedRect(context, outerPadding, rowY, contentWidth, rowHeight, 0, "rgba(255, 252, 247, 0.92)");
+    }
+
+    context.fillStyle = "#1f2a24";
+    context.font = '500 24px "Barlow", sans-serif';
+    const productText = truncateText(context, row.producto, productColumnWidth - 16);
+    context.fillText(productText, outerPadding + 28, rowY + 35);
+    context.textAlign = "center";
+    context.fillText(String(row.inventario), outerPadding + 28 + productColumnWidth + inventoryColumnWidth / 2, rowY + 35);
+    context.fillText(
+      String(row.sugeridas),
+      outerPadding + 28 + productColumnWidth + inventoryColumnWidth + suggestedColumnWidth / 2,
+      rowY + 35,
+    );
+    context.textAlign = "left";
+
+    context.strokeStyle = "rgba(31, 42, 36, 0.08)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(outerPadding, rowY + rowHeight);
+    context.lineTo(outerPadding + contentWidth, rowY + rowHeight);
+    context.stroke();
+  });
+
+  y += visibleRows.length * rowHeight;
+  drawRoundedRect(context, outerPadding, y, contentWidth, footerHeight, 28, "#fff7e8");
+  context.fillStyle = "#6f4d0c";
+  context.font = '700 28px "Barlow", sans-serif';
+  context.fillText(`Total de productos: ${visibleRows.length}`, outerPadding + cardPadding, y + 50);
+  context.font = '500 22px "Barlow", sans-serif';
+  context.fillText("Enviado desde HIT GTA", outerPadding + cardPadding, y + 86);
+
+  const blob = await canvasToBlob(canvas);
+  return {
+    blob,
+    url: URL.createObjectURL(blob),
+  };
+}
+
+function drawReceiptBackground(context, width, height) {
+  const background = context.createLinearGradient(0, 0, 0, height);
+  background.addColorStop(0, "#f9f5ef");
+  background.addColorStop(1, "#efe6d7");
+  context.fillStyle = background;
+  context.fillRect(0, 0, width, height);
+
+  const glow = context.createRadialGradient(width * 0.84, height * 0.14, 40, width * 0.84, height * 0.14, 280);
+  glow.addColorStop(0, "rgba(239, 182, 79, 0.28)");
+  glow.addColorStop(1, "rgba(239, 182, 79, 0)");
+  context.fillStyle = glow;
+  context.fillRect(0, 0, width, height);
+}
+
+function drawDetailsGrid(context, receipt, x, y, width) {
+  const leftX = x;
+  const rightX = x + width / 2 + 10;
+  const columnWidth = width / 2 - 20;
+  const gapY = 72;
+
+  drawDetailItem(context, leftX, y, "Promotora", receipt.promotora || "-", columnWidth);
+  drawDetailItem(context, rightX, y, "Tienda", receipt.tienda || "-", columnWidth);
+  drawDetailItem(context, leftX, y + gapY, "Fecha", formatReceiptDateTime(receipt.submittedAtIso), columnWidth);
+  drawDetailItem(context, rightX, y + gapY, "Proxima visita", formatReceiptDate(receipt.nextVisit), columnWidth);
+}
+
+function drawDetailItem(context, x, y, label, value, maxWidth) {
+  context.fillStyle = "#6d786f";
+  context.font = '600 20px "Barlow", sans-serif';
+  context.fillText(label.toUpperCase(), x, y);
+  context.fillStyle = "#1f2a24";
+  context.font = '700 30px "Barlow", sans-serif';
+  context.fillText(truncateText(context, value, maxWidth), x, y + 36);
+}
+
+function drawRoundedRect(context, x, y, width, height, radius, fillStyle) {
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+  context.fillStyle = fillStyle;
+  context.fill();
+}
+
+function truncateText(context, value, maxWidth) {
+  if (context.measureText(value).width <= maxWidth) {
+    return value;
+  }
+
+  let trimmed = value;
+  while (trimmed.length > 0 && context.measureText(`${trimmed}...`).width > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+  }
+
+  return `${trimmed}...`;
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("No se pudo generar la imagen."));
+        return;
+      }
+
+      resolve(blob);
+    }, "image/png");
+  });
+}
+
+async function handleSubmitFrameLoad() {
   if (!state.isSubmitting) {
     return;
   }
@@ -984,6 +1567,10 @@ function handleSubmitFrameLoad() {
   }
 
   setSubmissionStatus("Informacion enviada a la hoja Inventario.", "success");
+  if (state.pendingInventoryReceipt) {
+    await openInventoryReceiptPreview(state.pendingInventoryReceipt);
+    state.pendingInventoryReceipt = null;
+  }
 }
 
 function setSubmissionStatus(message, tone = "") {

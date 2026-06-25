@@ -5,6 +5,7 @@ Base inicial de una web pensada para telefonos moviles.
 ## Que hace
 
 - Carga datos desde un CSV.
+- Incluye login con usuarios desde un CSV publicado.
 - Llena listas desplegables unicas para `Promotoria`, `Nombre de la tienda` y `Familia`.
 - Filtra la tabla de productos.
 - Muestra la columna `Venta Promedio Dia`.
@@ -16,6 +17,33 @@ Base inicial de una web pensada para telefonos moviles.
 - `app.js`: carga de datos, filtros y renderizado.
 - `Code.gs`: recibe envios y los guarda en la hoja `Inventario`.
 - `data/catalogo-muestra.csv`: muestra local para desarrollo.
+
+## Login
+
+La app toma usuarios desde un CSV con columnas como:
+
+- `Promotora`: nombre visible.
+- `roll`: rol del usuario.
+- `user`: usuario de acceso.
+- `contraseña`: compatibilidad temporal con texto plano.
+
+Tambien soporta `password_hash` en formato `SHA-256` hexadecimal. Si existe, se usa ese valor y ya no hace falta `contraseña`.
+
+## Recomendacion para contrasenas
+
+Lo que yo haria es esto:
+
+1. Agregar una columna `password_hash`.
+2. Guardar ahi el `SHA-256` de cada contrasena.
+3. Vaciar o eliminar la columna `contraseña`.
+
+Ejemplo para generar un hash:
+
+```bash
+printf '1126' | sha256sum
+```
+
+Importante: como el CSV de usuarios esta publicado en internet, esto mejora el manejo de contrasenas, pero no convierte el login en seguridad fuerte. Para produccion, lo correcto es mover los usuarios a una hoja privada validada desde `Code.gs` o a un backend real.
 
 ## Como abrirla
 

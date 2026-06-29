@@ -999,6 +999,30 @@ thead th:nth-child(2) {
     text-transform: uppercase;
   }
 
+  #hit-gta-module tbody td:nth-child(2) {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  #hit-gta-module tbody td:nth-child(2)::before {
+    display: block;
+  }
+
+  #store-check-module tbody td:nth-child(2),
+  #store-check-module tbody td:nth-child(3),
+  #store-check-module tbody td:nth-child(4) {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    align-items: stretch;
+  }
+
+  #store-check-module tbody td:nth-child(2)::before,
+  #store-check-module tbody td:nth-child(3)::before,
+  #store-check-module tbody td:nth-child(4)::before {
+    display: block;
+  }
+
   .empty-state td {
     display: block;
     padding: 4px 0;
@@ -1019,6 +1043,18 @@ thead th:nth-child(2) {
   .offer-date-input {
     min-width: 0;
     width: 100%;
+  }
+
+  #hit-gta-module .inventory-input {
+    min-height: 46px;
+    padding: 10px 12px;
+    text-align: left;
+  }
+
+  #store-check-module .price-input,
+  #store-check-module .offer-date-input {
+    min-height: 46px;
+    padding: 10px 12px;
   }
 
   .offer-date-placeholder {

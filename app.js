@@ -31,12 +31,15 @@ const state = {
   storeCheckRows: [],
   storeCheckVisibleCount: STORE_CHECK_PAGE_SIZE,
   storeCheckDrafts: {},
+  storeCheckSharedOfferUntil: "",
+  storeCheckSharedOfferSourceRowKey: "",
   authUser: null,
   isSubmitting: false,
   isAuthenticating: false,
-  pendingInventoryReceipt: null,
+  pendingReceipt: null,
   receiptImageBlob: null,
   receiptImageUrl: "",
+  receiptFileBaseName: "comprobante-hit-gta",
   loadingTimer: 0,
 };
 
@@ -358,6 +361,8 @@ function filterRows(filters) {
 
 function populateStoreCheckFilters() {
   state.storeCheckVisibleCount = STORE_CHECK_PAGE_SIZE;
+  state.storeCheckSharedOfferUntil = "";
+  state.storeCheckSharedOfferSourceRowKey = "";
 }
 
 function syncStoreCheckFilterOptions() {
@@ -984,13 +989,23 @@ function handleStoreCheckTableInput(event) {
       draft.offerDateActive = false;
       if (!draft.promo) {
         draft.offerUntil = "";
+        if (state.storeCheckSharedOfferSourceRowKey === (row.dataset.rowKey || "")) {
+          state.storeCheckSharedOfferUntil = "";
+          state.storeCheckSharedOfferSourceRowKey = "";
+        }
       }
     }
     return;
   }
 
   if (target.classList.contains("offer-date-input")) {
+    const rowKey = row.dataset.rowKey || "";
     draft.offerUntil = target.value;
+    if (!state.storeCheckSharedOfferSourceRowKey || state.storeCheckSharedOfferSourceRowKey === rowKey) {
+      state.storeCheckSharedOfferUntil = target.value;
+      state.storeCheckSharedOfferSourceRowKey = target.value ? rowKey : "";
+      syncStoreCheckOfferDates(rowKey, target.value);
+    }
   }
 }
 
@@ -1019,6 +1034,10 @@ function handleStoreCheckTableFocusOut(event) {
   if (!draft.promo) {
     draft.offerDateActive = false;
     draft.offerUntil = "";
+    if (state.storeCheckSharedOfferSourceRowKey === rowKey) {
+      state.storeCheckSharedOfferUntil = "";
+      state.storeCheckSharedOfferSourceRowKey = "";
+    }
     updateOfferDateCell(row, draft);
     return;
   }
@@ -1027,6 +1046,12 @@ function handleStoreCheckTableFocusOut(event) {
   draft.offerDateActive = isValid;
   if (!isValid) {
     draft.offerUntil = "";
+    if (state.storeCheckSharedOfferSourceRowKey === rowKey) {
+      state.storeCheckSharedOfferUntil = "";
+      state.storeCheckSharedOfferSourceRowKey = "";
+    }
+  } else if (!draft.offerUntil && state.storeCheckSharedOfferUntil) {
+    draft.offerUntil = state.storeCheckSharedOfferUntil;
   }
   updateOfferDateCell(row, draft);
 }
@@ -1139,6 +1164,10 @@ function renderOfferDateCell(row) {
     return `<span class="offer-date-placeholder">Captura precio promocion</span>`;
   }
 
+  if (!draft.offerUntil && state.storeCheckSharedOfferUntil) {
+    draft.offerUntil = state.storeCheckSharedOfferUntil;
+  }
+
   return `
     <input
       class="offer-date-input"
@@ -1159,6 +1188,10 @@ function updateOfferDateCell(rowElement, draft) {
   if (!draft.offerDateActive) {
     offerDateCell.innerHTML = `<span class="offer-date-placeholder">Captura precio promocion</span>`;
     return;
+  }
+
+  if (!draft.offerUntil && state.storeCheckSharedOfferUntil) {
+    draft.offerUntil = state.storeCheckSharedOfferUntil;
   }
 
   offerDateCell.innerHTML = `
@@ -1198,6 +1231,31 @@ function validateStoreCheckPrices(rowElement, draft) {
   return true;
 }
 
+function syncStoreCheckOfferDates(sourceRowKey, offerUntil) {
+  if (!offerUntil) {
+    return;
+  }
+
+  elements.storeCheckResultsBody.querySelectorAll("tr").forEach((rowElement) => {
+    if (!(rowElement instanceof HTMLTableRowElement)) {
+      return;
+    }
+
+    const rowKey = rowElement.dataset.rowKey || "";
+    if (!rowKey || rowKey === sourceRowKey) {
+      return;
+    }
+
+    const draft = getStoreCheckDraftByKey(rowKey);
+    if (!draft.offerDateActive || !draft.promo) {
+      return;
+    }
+
+    draft.offerUntil = offerUntil;
+    updateOfferDateCell(rowElement, draft);
+  });
+}
+
 function submitInventoryData() {
   if (state.isSubmitting) {
     return;
@@ -1214,7 +1272,7 @@ function submitInventoryData() {
     return;
   }
 
-  state.pendingInventoryReceipt = buildInventoryReceiptModel(rowsToSubmit);
+  state.pendingReceipt = buildInventoryReceiptModel(rowsToSubmit);
   state.isSubmitting = true;
   elements.sendButton.disabled = true;
   elements.payloadInput.value = JSON.stringify({ target: "inventario", rows: rowsToSubmit });
@@ -1247,7 +1305,7 @@ function submitStoreCheckData() {
   }
 
   state.isSubmitting = true;
-  state.pendingInventoryReceipt = null;
+  state.pendingReceipt = buildStoreCheckReceiptModel(rowsToSubmit);
   elements.storeCheckSendButton.disabled = true;
   elements.payloadInput.value = JSON.stringify({ target: "promociones", rows: rowsToSubmit });
   elements.submitForm.action = APPS_SCRIPT_WEB_APP_URL;
@@ -1331,6 +1389,7 @@ function buildInventoryReceiptModel(rows) {
   const submittedAt = new Date();
 
   return {
+    type: "inventario",
     submittedAtIso: submittedAt.toISOString(),
     promotora: state.authUser?.displayName || rows[0]?.Promotora || "",
     tienda: elements.homeStoreSelect.value || rows[0]?.Nombre_Tienda || "",
@@ -1343,11 +1402,32 @@ function buildInventoryReceiptModel(rows) {
   };
 }
 
+function buildStoreCheckReceiptModel(rows) {
+  const submittedAt = new Date();
+
+  return {
+    type: "store-check",
+    submittedAtIso: submittedAt.toISOString(),
+    promotora: state.authUser?.displayName || rows[0]?.Promotora || "",
+    tienda: elements.homeStoreSelect.value || rows[0]?.NombreTienda || "",
+    rows: rows.map((row) => ({
+      producto: row.Descripcion || "",
+      precioRegular: row.PrecioRegular || "",
+      precioPromocion: row.PrecioOferta || "",
+      ofertaHasta: row.OfertaHasta || "",
+    })),
+  };
+}
+
 async function openInventoryReceiptPreview(receipt) {
-  const asset = await createInventoryReceiptAsset(receipt);
+  const asset =
+    receipt.type === "store-check"
+      ? await createStoreCheckReceiptAsset(receipt)
+      : await createInventoryReceiptAsset(receipt);
   resetReceiptAsset();
   state.receiptImageBlob = asset.blob;
   state.receiptImageUrl = asset.url;
+  state.receiptFileBaseName = receipt.type === "store-check" ? "comprobante-store-check" : "comprobante-hit-gta";
   elements.receiptPreviewImage.src = asset.url;
   elements.receiptPreviewOverlay.classList.remove("is-hidden");
   updateReceiptShareAvailability();
@@ -1364,6 +1444,7 @@ function resetReceiptAsset() {
 
   state.receiptImageBlob = null;
   state.receiptImageUrl = "";
+  state.receiptFileBaseName = "comprobante-hit-gta";
   elements.receiptPreviewImage.removeAttribute("src");
   closeReceiptPreview();
 }
@@ -1388,7 +1469,7 @@ function downloadReceiptImage() {
 
   const link = document.createElement("a");
   link.href = state.receiptImageUrl;
-  link.download = `comprobante-hit-gta-${formatDateForFileName(new Date())}.png`;
+  link.download = `${state.receiptFileBaseName}-${formatDateForFileName(new Date())}.png`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -1399,7 +1480,7 @@ async function shareReceiptImage() {
     return;
   }
 
-  const receiptFile = new File([state.receiptImageBlob], "comprobante-hit-gta.png", { type: "image/png" });
+  const receiptFile = new File([state.receiptImageBlob], `${state.receiptFileBaseName}.png`, { type: "image/png" });
   if (!navigator.canShare({ files: [receiptFile] })) {
     return;
   }
@@ -1416,20 +1497,21 @@ async function shareReceiptImage() {
 async function createInventoryReceiptAsset(receipt) {
   const width = 1080;
   const outerPadding = 56;
-  const cardPadding = 46;
-  const headerHeight = 168;
-  const detailsBlockHeight = 196;
-  const tableHeaderHeight = 58;
-  const rowHeight = 54;
-  const footerHeight = 110;
+  const cardPadding = 42;
+  const headerHeight = 130;
+  const detailsBlockHeight = 156;
+  const tableHeaderHeight = 50;
+  const rowHeight = 48;
+  const footerHeight = 104;
   const contentWidth = width - outerPadding * 2;
   const visibleRows = receipt.rows;
+  const totalSuggestedBoxes = visibleRows.reduce((sum, row) => sum + toNumber(row.sugeridas), 0);
   const height =
     outerPadding * 2 +
     headerHeight +
-    24 +
+    18 +
     detailsBlockHeight +
-    24 +
+    18 +
     tableHeaderHeight +
     visibleRows.length * rowHeight +
     footerHeight;
@@ -1447,27 +1529,27 @@ async function createInventoryReceiptAsset(receipt) {
   let y = outerPadding;
   drawRoundedRect(context, outerPadding, y, contentWidth, headerHeight, 34, "#0f766e");
   context.fillStyle = "#fffdf8";
-  context.font = '700 52px "Barlow", sans-serif';
-  context.fillText("HIT GTA", outerPadding + cardPadding, y + 72);
-  context.font = '500 28px "Barlow", sans-serif';
+  context.font = '700 42px "Barlow", sans-serif';
+  context.fillText("HIT GTA", outerPadding + cardPadding, y + 56);
+  context.font = '500 22px "Barlow", sans-serif';
   context.fillStyle = "rgba(255, 253, 248, 0.88)";
-  context.fillText("Comprobante de envio", outerPadding + cardPadding, y + 114);
+  context.fillText("Comprobante de envio", outerPadding + cardPadding, y + 90);
 
-  y += headerHeight + 24;
+  y += headerHeight + 18;
   drawRoundedRect(context, outerPadding, y, contentWidth, detailsBlockHeight, 30, "#fffdf9");
-  drawDetailsGrid(context, receipt, outerPadding + cardPadding, y + 42, contentWidth - cardPadding * 2);
+  drawDetailsGrid(context, receipt, outerPadding + cardPadding, y + 34, contentWidth - cardPadding * 2);
 
-  y += detailsBlockHeight + 24;
-  const productColumnWidth = contentWidth - 280;
-  const inventoryColumnWidth = 132;
-  const suggestedColumnWidth = 148;
+  y += detailsBlockHeight + 18;
+  const productColumnWidth = contentWidth - 250;
+  const inventoryColumnWidth = 118;
+  const suggestedColumnWidth = 132;
 
   drawRoundedRect(context, outerPadding, y, contentWidth, tableHeaderHeight, 24, "rgba(15, 118, 110, 0.12)");
   context.fillStyle = "#0b5d57";
-  context.font = '700 24px "Barlow", sans-serif';
-  context.fillText("Producto", outerPadding + 28, y + 37);
-  context.fillText("Inventario", outerPadding + 28 + productColumnWidth, y + 37);
-  context.fillText("Cajas sugeridas", outerPadding + 28 + productColumnWidth + inventoryColumnWidth, y + 37);
+  context.font = '700 22px "Barlow", sans-serif';
+  context.fillText("Producto", outerPadding + 24, y + 32);
+  context.fillText("Inventario", outerPadding + 24 + productColumnWidth, y + 32);
+  context.fillText("Cajas sugeridas", outerPadding + 24 + productColumnWidth + inventoryColumnWidth, y + 32);
 
   y += tableHeaderHeight;
   visibleRows.forEach((row, index) => {
@@ -1477,15 +1559,15 @@ async function createInventoryReceiptAsset(receipt) {
     }
 
     context.fillStyle = "#1f2a24";
-    context.font = '500 24px "Barlow", sans-serif';
-    const productText = truncateText(context, row.producto, productColumnWidth - 16);
-    context.fillText(productText, outerPadding + 28, rowY + 35);
+    context.font = '500 21px "Barlow", sans-serif';
+    const productText = truncateText(context, row.producto, productColumnWidth - 12);
+    context.fillText(productText, outerPadding + 24, rowY + 31);
     context.textAlign = "center";
-    context.fillText(String(row.inventario), outerPadding + 28 + productColumnWidth + inventoryColumnWidth / 2, rowY + 35);
+    context.fillText(String(row.inventario), outerPadding + 24 + productColumnWidth + inventoryColumnWidth / 2, rowY + 31);
     context.fillText(
       String(row.sugeridas),
-      outerPadding + 28 + productColumnWidth + inventoryColumnWidth + suggestedColumnWidth / 2,
-      rowY + 35,
+      outerPadding + 24 + productColumnWidth + inventoryColumnWidth + suggestedColumnWidth / 2,
+      rowY + 31,
     );
     context.textAlign = "left";
 
@@ -1500,10 +1582,119 @@ async function createInventoryReceiptAsset(receipt) {
   y += visibleRows.length * rowHeight;
   drawRoundedRect(context, outerPadding, y, contentWidth, footerHeight, 28, "#fff7e8");
   context.fillStyle = "#6f4d0c";
-  context.font = '700 28px "Barlow", sans-serif';
-  context.fillText(`Total de productos: ${visibleRows.length}`, outerPadding + cardPadding, y + 50);
+  context.font = '700 24px "Barlow", sans-serif';
+  context.fillText(`Total de productos: ${visibleRows.length}`, outerPadding + cardPadding, y + 42);
+  context.fillText(`Total de cajas sugeridas: ${totalSuggestedBoxes}`, outerPadding + cardPadding, y + 74);
+  context.font = '500 18px "Barlow", sans-serif';
+  context.fillText("Enviado desde HIT GTA", outerPadding + cardPadding, y + 96);
+
+  const blob = await canvasToBlob(canvas);
+  return {
+    blob,
+    url: URL.createObjectURL(blob),
+  };
+}
+
+async function createStoreCheckReceiptAsset(receipt) {
+  const width = 1080;
+  const outerPadding = 56;
+  const cardPadding = 42;
+  const headerHeight = 130;
+  const detailsBlockHeight = 100;
+  const tableHeaderHeight = 50;
+  const rowHeight = 48;
+  const footerHeight = 104;
+  const contentWidth = width - outerPadding * 2;
+  const visibleRows = receipt.rows;
+  const totalPromoRows = visibleRows.filter((row) => row.precioPromocion).length;
+  const height =
+    outerPadding * 2 +
+    headerHeight +
+    18 +
+    detailsBlockHeight +
+    18 +
+    tableHeaderHeight +
+    visibleRows.length * rowHeight +
+    footerHeight;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("No se pudo crear el comprobante.");
+  }
+
+  drawReceiptBackground(context, width, height);
+
+  let y = outerPadding;
+  drawRoundedRect(context, outerPadding, y, contentWidth, headerHeight, 34, "#8f6422");
+  context.fillStyle = "#fffdf8";
+  context.font = '700 42px "Barlow", sans-serif';
+  context.fillText("STORE CHECK", outerPadding + cardPadding, y + 56);
   context.font = '500 22px "Barlow", sans-serif';
-  context.fillText("Enviado desde HIT GTA", outerPadding + cardPadding, y + 86);
+  context.fillStyle = "rgba(255, 253, 248, 0.88)";
+  context.fillText("Comprobante de envio", outerPadding + cardPadding, y + 90);
+
+  y += headerHeight + 18;
+  drawRoundedRect(context, outerPadding, y, contentWidth, detailsBlockHeight, 30, "#fffdf9");
+  drawStoreCheckDetailsGrid(context, receipt, outerPadding + cardPadding, y + 34, contentWidth - cardPadding * 2);
+
+  y += detailsBlockHeight + 18;
+  const productColumnWidth = contentWidth - 384;
+  const regularColumnWidth = 114;
+  const promoColumnWidth = 114;
+  const offerColumnWidth = 156;
+
+  drawRoundedRect(context, outerPadding, y, contentWidth, tableHeaderHeight, 24, "rgba(143, 100, 34, 0.12)");
+  context.fillStyle = "#6f4d0c";
+  context.font = '700 20px "Barlow", sans-serif';
+  context.fillText("Producto", outerPadding + 24, y + 31);
+  context.fillText("Regular", outerPadding + 24 + productColumnWidth, y + 31);
+  context.fillText("Promo", outerPadding + 24 + productColumnWidth + regularColumnWidth, y + 31);
+  context.fillText("Vigencia", outerPadding + 24 + productColumnWidth + regularColumnWidth + promoColumnWidth, y + 31);
+
+  y += tableHeaderHeight;
+  visibleRows.forEach((row, index) => {
+    const rowY = y + index * rowHeight;
+    if (index % 2 === 0) {
+      drawRoundedRect(context, outerPadding, rowY, contentWidth, rowHeight, 0, "rgba(255, 252, 247, 0.92)");
+    }
+
+    context.fillStyle = "#1f2a24";
+    context.font = '500 20px "Barlow", sans-serif';
+    const productText = truncateText(context, row.producto, productColumnWidth - 10);
+    context.fillText(productText, outerPadding + 24, rowY + 31);
+    context.textAlign = "center";
+    context.fillText(formatPriceForReceipt(row.precioRegular), outerPadding + 24 + productColumnWidth + regularColumnWidth / 2, rowY + 31);
+    context.fillText(
+      formatPriceForReceipt(row.precioPromocion),
+      outerPadding + 24 + productColumnWidth + regularColumnWidth + promoColumnWidth / 2,
+      rowY + 31,
+    );
+    context.fillText(
+      formatReceiptDate(row.ofertaHasta || "") || "-",
+      outerPadding + 24 + productColumnWidth + regularColumnWidth + promoColumnWidth + offerColumnWidth / 2,
+      rowY + 31,
+    );
+    context.textAlign = "left";
+
+    context.strokeStyle = "rgba(31, 42, 36, 0.08)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(outerPadding, rowY + rowHeight);
+    context.lineTo(outerPadding + contentWidth, rowY + rowHeight);
+    context.stroke();
+  });
+
+  y += visibleRows.length * rowHeight;
+  drawRoundedRect(context, outerPadding, y, contentWidth, footerHeight, 28, "#fff7e8");
+  context.fillStyle = "#6f4d0c";
+  context.font = '700 24px "Barlow", sans-serif';
+  context.fillText(`Total de productos: ${visibleRows.length}`, outerPadding + cardPadding, y + 42);
+  context.fillText(`Promociones capturadas: ${totalPromoRows}`, outerPadding + cardPadding, y + 74);
+  context.font = '500 18px "Barlow", sans-serif';
+  context.fillText("Enviado desde Store Check", outerPadding + cardPadding, y + 96);
 
   const blob = await canvasToBlob(canvas);
   return {
@@ -1530,7 +1721,7 @@ function drawDetailsGrid(context, receipt, x, y, width) {
   const leftX = x;
   const rightX = x + width / 2 + 10;
   const columnWidth = width / 2 - 20;
-  const gapY = 72;
+  const gapY = 56;
 
   drawDetailItem(context, leftX, y, "Promotora", receipt.promotora || "-", columnWidth);
   drawDetailItem(context, rightX, y, "Tienda", receipt.tienda || "-", columnWidth);
@@ -1538,13 +1729,23 @@ function drawDetailsGrid(context, receipt, x, y, width) {
   drawDetailItem(context, rightX, y + gapY, "Proxima visita", formatReceiptDate(receipt.nextVisit), columnWidth);
 }
 
+function drawStoreCheckDetailsGrid(context, receipt, x, y, width) {
+  const leftX = x;
+  const rightX = x + width / 2 + 10;
+  const columnWidth = width / 2 - 20;
+
+  drawDetailItem(context, leftX, y, "Promotora", receipt.promotora || "-", columnWidth);
+  drawDetailItem(context, rightX, y, "Tienda", receipt.tienda || "-", columnWidth);
+  drawDetailItem(context, leftX, y + 56, "Fecha", formatReceiptDateTime(receipt.submittedAtIso), columnWidth);
+}
+
 function drawDetailItem(context, x, y, label, value, maxWidth) {
   context.fillStyle = "#6d786f";
-  context.font = '600 20px "Barlow", sans-serif';
+  context.font = '600 18px "Barlow", sans-serif';
   context.fillText(label.toUpperCase(), x, y);
   context.fillStyle = "#1f2a24";
-  context.font = '700 30px "Barlow", sans-serif';
-  context.fillText(truncateText(context, value, maxWidth), x, y + 36);
+  context.font = '700 24px "Barlow", sans-serif';
+  context.fillText(truncateText(context, value, maxWidth), x, y + 30);
 }
 
 function drawRoundedRect(context, x, y, width, height, radius, fillStyle) {
@@ -1577,6 +1778,19 @@ function truncateText(context, value, maxWidth) {
   return `${trimmed}...`;
 }
 
+function formatPriceForReceipt(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const numericValue = Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) {
+    return value;
+  }
+
+  return numericValue.toFixed(2);
+}
+
 function canvasToBlob(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -1602,13 +1816,13 @@ async function handleSubmitFrameLoad() {
   const currentPayload = parseCurrentPayload();
   if (currentPayload.target === "promociones") {
     setStoreCheckSubmissionStatus("Informacion enviada a la hoja Promociones.", "success");
-    return;
+  } else {
+    setSubmissionStatus("Informacion enviada a la hoja Inventario.", "success");
   }
 
-  setSubmissionStatus("Informacion enviada a la hoja Inventario.", "success");
-  if (state.pendingInventoryReceipt) {
-    await openInventoryReceiptPreview(state.pendingInventoryReceipt);
-    state.pendingInventoryReceipt = null;
+  if (state.pendingReceipt) {
+    await openInventoryReceiptPreview(state.pendingReceipt);
+    state.pendingReceipt = null;
   }
 }
 

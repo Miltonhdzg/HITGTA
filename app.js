@@ -48,6 +48,10 @@ const elements = {
   loginButton: document.querySelector("#login-button"),
   loginStatus: document.querySelector("#login-status"),
   sessionBar: document.querySelector("#session-bar"),
+  sessionBarHost: document.querySelector("#session-bar-host"),
+  homeSessionHost: document.querySelector("#home-session-host"),
+  hitGtaSessionHost: document.querySelector("#hit-gta-session-host"),
+  storeCheckSessionHost: document.querySelector("#store-check-session-host"),
   homeStoreSelect: document.querySelector("#home-store-select"),
   homeSelectionStatus: document.querySelector("#home-selection-status"),
   sessionUser: document.querySelector("#session-user"),
@@ -58,8 +62,6 @@ const elements = {
   moduleButtons: document.querySelectorAll("[data-module-target]"),
   hitGtaModule: document.querySelector("#hit-gta-module"),
   storeCheckModule: document.querySelector("#store-check-module"),
-  backHomeHitGta: document.querySelector("#back-home-hit-gta"),
-  backHomeStoreCheck: document.querySelector("#back-home-store-check"),
   loadingOverlay: document.querySelector("#loading-overlay"),
   loadingTitle: document.querySelector("#loading-title"),
   loadingProgressBar: document.querySelector("#loading-progress-bar"),
@@ -122,13 +124,10 @@ async function boot() {
 
 function bindEvents() {
   elements.loginForm.addEventListener("submit", handleLoginSubmit);
-  elements.logoutButton.addEventListener("click", handleLogout);
+  elements.logoutButton.addEventListener("click", handleSessionAction);
   elements.moduleButtons.forEach((button) => {
     button.addEventListener("click", () => openModuleWithLoader(button.dataset.moduleTarget || "", button));
   });
-
-  elements.backHomeHitGta.addEventListener("click", showHomeScreen);
-  elements.backHomeStoreCheck.addEventListener("click", showHomeScreen);
   elements.homeStoreSelect.addEventListener("change", handleGlobalStoreChange);
   elements.familiaSelect.addEventListener("change", handleFilterChange);
   elements.visitDate.addEventListener("change", updateDdiSugeridos);
@@ -159,12 +158,14 @@ function showHomeScreen() {
     return;
   }
 
+  mountSessionBar(elements.homeSessionHost);
   elements.loginScreen.classList.add("is-hidden");
   elements.sessionBar.classList.remove("is-hidden");
   elements.homeScreen.classList.remove("is-hidden");
   elements.moduleScreens.forEach((screen) => {
     screen.classList.add("is-hidden");
   });
+  setSessionAction("logout");
   updateModuleAvailability();
 }
 
@@ -174,15 +175,19 @@ function showModule(moduleId) {
     return;
   }
 
+  mountSessionBar(getSessionBarHostForModule(moduleId));
   elements.loginScreen.classList.add("is-hidden");
   elements.sessionBar.classList.remove("is-hidden");
   elements.homeScreen.classList.add("is-hidden");
   elements.moduleScreens.forEach((screen) => {
     screen.classList.toggle("is-hidden", screen.id !== moduleId);
   });
+  setSessionAction("home");
 }
 
 function showLoginScreen() {
+  mountSessionBar(elements.sessionBarHost);
+  setSessionAction("logout");
   elements.loginScreen.classList.remove("is-hidden");
   elements.sessionBar.classList.add("is-hidden");
   elements.homeScreen.classList.add("is-hidden");
@@ -621,6 +626,15 @@ function handleLogout() {
   showLoginScreen();
 }
 
+function handleSessionAction() {
+  if (elements.logoutButton.dataset.action === "home") {
+    showHomeScreen();
+    return;
+  }
+
+  handleLogout();
+}
+
 async function verifyPassword(user, inputPassword) {
   if (user.passwordHash) {
     const hashedInput = await sha256Hex(inputPassword);
@@ -687,6 +701,31 @@ function updateSessionBar() {
 
   elements.sessionUser.textContent = state.authUser.displayName;
   elements.sessionRole.textContent = `Rol: ${state.authUser.role}`;
+}
+
+function mountSessionBar(host) {
+  if (!host || host.contains(elements.sessionBar)) {
+    return;
+  }
+
+  host.appendChild(elements.sessionBar);
+}
+
+function setSessionAction(action) {
+  elements.logoutButton.dataset.action = action;
+  elements.logoutButton.textContent = action === "home" ? "Inicio" : "Salir";
+}
+
+function getSessionBarHostForModule(moduleId) {
+  if (moduleId === "hit-gta-module") {
+    return elements.hitGtaSessionHost;
+  }
+
+  if (moduleId === "store-check-module") {
+    return elements.storeCheckSessionHost;
+  }
+
+  return elements.sessionBarHost;
 }
 
 function setLoginStatus(message, tone = "") {

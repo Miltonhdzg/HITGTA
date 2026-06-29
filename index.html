@@ -39,18 +39,17 @@
         </section>
       </section>
 
-      <section id="session-bar" class="session-bar is-hidden" aria-label="Sesion activa">
-        <div class="session-summary">
-          <p id="session-user" class="session-user"></p>
-          <p id="session-role" class="session-role"></p>
-        </div>
-        <button id="logout-button" class="logout-button" type="button">Salir</button>
-      </section>
+      <div id="session-bar-host"></div>
 
       <section id="home-screen" class="home-screen">
         <div class="hero hero-home">
-          <p class="eyebrow">Menu principal</p>
-          <h1>HIT GTA</h1>
+          <div class="hero-home-content">
+            <div>
+              <p class="eyebrow">Menu principal</p>
+              <h1>HIT GTA</h1>
+            </div>
+            <div id="home-session-host" class="hero-session-host"></div>
+          </div>
         </div>
 
         <section class="filters-card home-store-card" aria-label="Seleccion de tienda">
@@ -79,17 +78,21 @@
         </section>
       </section>
 
-      <section id="hit-gta-module" class="module-screen is-hidden">
-        <div class="module-topbar">
-          <button id="back-home-hit-gta" class="back-button" type="button">Inicio</button>
-          <span class="module-badge">HIT GTA</span>
+      <section id="session-bar" class="session-bar is-hidden" aria-label="Sesion activa">
+        <div class="session-summary">
+          <p id="session-user" class="session-user"></p>
+          <p id="session-role" class="session-role"></p>
         </div>
+        <button id="logout-button" class="logout-button" type="button">Salir</button>
+      </section>
 
+      <section id="hit-gta-module" class="module-screen is-hidden">
         <section class="hero hero-module">
           <div>
             <p class="eyebrow">Inventarios GTA</p>
             <h1>HIT GTA</h1>
           </div>
+          <div id="hit-gta-session-host" class="hero-session-host"></div>
         </section>
 
         <section class="filters-card" aria-label="Filtros de consulta">
@@ -137,16 +140,12 @@
       </section>
 
       <section id="store-check-module" class="module-screen is-hidden">
-        <div class="module-topbar">
-          <button id="back-home-store-check" class="back-button" type="button">Inicio</button>
-          <span class="module-badge">Store Check</span>
-        </div>
-
         <section class="hero hero-store-check hero-module">
           <div>
             <p class="eyebrow">Revision de precios</p>
             <h1>Store Check</h1>
           </div>
+          <div id="store-check-session-host" class="hero-session-host"></div>
         </section>
 
         <section class="table-card">

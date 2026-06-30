@@ -635,6 +635,11 @@ input {
   font-weight: 700;
 }
 
+.confirm-button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
 .confirm-button-muted {
   background: rgba(31, 42, 36, 0.08);
   color: var(--text);

@@ -1,6 +1,7 @@
 const HISTORY_STATE = {
   rows: [],
   filteredRows: [],
+  groupedSubmissions: [],
   loaded: false,
   loading: false,
   error: "",
@@ -38,6 +39,11 @@ const HISTORY_ELEMENTS = {
   storeChart: document.querySelector("#history-store-chart"),
   promotoraChart: document.querySelector("#history-promotora-chart"),
   tableBody: document.querySelector("#history-table-body"),
+  detailOverlay: document.querySelector("#history-detail-overlay"),
+  detailCloseButton: document.querySelector("#history-detail-close"),
+  detailTitle: document.querySelector("#history-detail-title"),
+  detailSubtitle: document.querySelector("#history-detail-subtitle"),
+  detailBody: document.querySelector("#history-detail-body"),
 };
 
 const HISTORY_COLORS = {
@@ -86,6 +92,10 @@ function bindHistoryEvents() {
   HISTORY_ELEMENTS.moduleFilter?.addEventListener("change", handleHistoryFilterChange);
   HISTORY_ELEMENTS.promotoraFilter?.addEventListener("change", handleHistoryFilterChange);
   HISTORY_ELEMENTS.storeFilter?.addEventListener("change", handleHistoryFilterChange);
+  HISTORY_ELEMENTS.tableBody?.addEventListener("click", handleHistoryTableClick);
+  HISTORY_ELEMENTS.tableBody?.addEventListener("keydown", handleHistoryTableKeydown);
+  HISTORY_ELEMENTS.detailCloseButton?.addEventListener("click", closeHistoryDetail);
+  HISTORY_ELEMENTS.detailOverlay?.addEventListener("click", handleHistoryDetailOverlayClick);
 }
 
 function configureHistoryFilters() {
@@ -270,13 +280,14 @@ function applyHistoryPayload(payload) {
     throw new Error(message);
   }
 
-  HISTORY_STATE.rows = payload.rows.map(normalizeHistoryRow).filter((row) => row.submittedAt);
+  HISTORY_STATE.rows = applyHistoryRoleScope(payload.rows.map(normalizeHistoryRow).filter((row) => row.submittedAt));
   HISTORY_STATE.loaded = true;
   HISTORY_STATE.error = "";
   HISTORY_STATE.lastLoadedAt = new Date().toLocaleTimeString("es-MX", {
     hour: "2-digit",
     minute: "2-digit",
   });
+  syncHistoryRoleUi();
   syncHistoryFilterOptions();
   renderHistory();
 }
@@ -286,6 +297,7 @@ function renderHistory(rows = HISTORY_STATE.rows) {
   HISTORY_STATE.filteredRows = filteredRows;
 
   const groupedSubmissions = groupSubmissions(filteredRows);
+  HISTORY_STATE.groupedSubmissions = groupedSubmissions;
   const dailySeries = buildDailySeries(filteredRows);
   const moduleSeries = buildModuleSeries(filteredRows);
   const storeSeries = buildStoreSeries(filteredRows);
@@ -354,11 +366,21 @@ function syncHistoryFilterOptions() {
   populateHistoryStoreFilter();
 }
 
+function syncHistoryRoleUi() {
+  const access = getHistoryAccessContext();
+  const isRestrictedPromotora = access.role === "promotora" && !access.canViewAll;
+
+  if (HISTORY_ELEMENTS.promotoraFilter) {
+    HISTORY_ELEMENTS.promotoraFilter.disabled = isRestrictedPromotora;
+  }
+}
+
 function populateHistoryPromotoraFilter() {
   if (!HISTORY_ELEMENTS.promotoraFilter) {
     return;
   }
 
+  const access = getHistoryAccessContext();
   const current = HISTORY_ELEMENTS.promotoraFilter.value;
   const filters = getHistorySelectedFilters();
   const promotoraValues = uniqueValues(
@@ -370,6 +392,14 @@ function populateHistoryPromotoraFilter() {
   HISTORY_ELEMENTS.promotoraFilter.innerHTML = '<option value="">Todas</option>';
   for (const promotora of promotoraValues) {
     HISTORY_ELEMENTS.promotoraFilter.append(new Option(promotora, promotora));
+  }
+
+  if (!access.canViewAll && access.role === "promotora") {
+    const ownPromotora = promotoraValues.find(
+      (promotora) => normalizeHistoryText(promotora) === normalizeHistoryText(access.displayName),
+    );
+    HISTORY_ELEMENTS.promotoraFilter.value = ownPromotora || promotoraValues[0] || "";
+    return;
   }
 
   HISTORY_ELEMENTS.promotoraFilter.value = promotoraValues.includes(current) ? current : "";
@@ -420,15 +450,16 @@ function updateSummaryCards(filteredRows, groupedSubmissions) {
 function renderChartNotes(dailySeries, moduleSeries, storeSeries, promotoraSeries, totalRows) {
   if (HISTORY_ELEMENTS.dailyNote) {
     const peakDay = getPeakSeriesItem(dailySeries);
+    const dayLabel = dailySeries.length === 1 ? "1 dia" : `${dailySeries.length} dias`;
     HISTORY_ELEMENTS.dailyNote.textContent = peakDay
-      ? `${dailySeries.length} dias · pico ${shortDateLabel(peakDay.label)}`
-      : `${dailySeries.length} dias`;
+      ? `${dayLabel} · pico ${shortDateLabel(peakDay.label)}`
+      : dayLabel;
   }
 
   if (HISTORY_ELEMENTS.moduleNote) {
     const leader = moduleSeries[0];
     HISTORY_ELEMENTS.moduleNote.textContent = leader
-      ? `${leader.label} lidera con ${formatNumber(leader.value)}`
+      ? `${leader.label} lidera con ${formatNumber(leader.value)} tiendas`
       : "Sin datos";
   }
 
@@ -455,11 +486,16 @@ function renderFilterSummary(filteredRows, groupedSubmissions) {
   }
 
   const filters = getHistorySelectedFilters();
+  const access = getHistoryAccessContext();
   const activeLabels = [];
 
   if (filters.module) activeLabels.push(`Modulo: ${filters.module}`);
   if (filters.promotora) activeLabels.push(`Promotora: ${filters.promotora}`);
   if (filters.store) activeLabels.push(`Tienda: ${filters.store}`);
+
+  if (!access.canViewAll && access.role === "promotora" && access.displayName) {
+    activeLabels.unshift(`Vista propia: ${access.displayName}`);
+  }
 
   const baseSummary = activeLabels.length ? activeLabels.join(" · ") : "Sin filtros adicionales";
   const rangeSummary = `${formatNumber(filteredRows.length)} registros en ${formatNumber(groupedSubmissions.length)} envios`;
@@ -484,7 +520,7 @@ function renderSubmissionTable(groupedSubmissions) {
     .slice(0, 12)
     .map(
       (entry) => `
-        <tr>
+        <tr class="history-table-row" data-submission-key="${escapeHtml(entry.key)}" tabindex="0">
           <td data-label="Fecha">${escapeHtml(entry.submittedAtDisplay || formatHistoryTimestamp(entry.submittedAt))}</td>
           <td data-label="Modulo">${escapeHtml(entry.module || "-")}</td>
           <td data-label="Promotora">${escapeHtml(entry.promotora || "-")}</td>
@@ -497,29 +533,44 @@ function renderSubmissionTable(groupedSubmissions) {
 }
 
 function buildDailySeries(rows) {
-  const counts = new Map();
+  const storesByDay = new Map();
 
   for (const row of rows) {
     const dateKey = row.submittedAtDateKey || "";
     if (!dateKey) continue;
-    counts.set(dateKey, (counts.get(dateKey) || 0) + 1);
+
+    const storeKey = String(row.numeroTienda || getStoreLabel(row) || "").trim();
+    if (!storeKey) continue;
+
+    if (!storesByDay.has(dateKey)) {
+      storesByDay.set(dateKey, new Set());
+    }
+
+    storesByDay.get(dateKey).add(storeKey);
   }
 
-  return [...counts.entries()]
+  return [...storesByDay.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([label, value]) => ({ label, value }));
+    .map(([label, stores]) => ({ label, value: stores.size }));
 }
 
 function buildModuleSeries(rows) {
-  const counts = new Map();
+  const storesByModule = new Map();
 
   for (const row of rows) {
     const key = row.module || "Sin modulo";
-    counts.set(key, (counts.get(key) || 0) + 1);
+    const storeKey = String(row.numeroTienda || getStoreLabel(row) || "").trim();
+    if (!storeKey) continue;
+
+    if (!storesByModule.has(key)) {
+      storesByModule.set(key, new Set());
+    }
+
+    storesByModule.get(key).add(storeKey);
   }
 
-  return [...counts.entries()]
-    .map(([label, value]) => ({ label, value }))
+  return [...storesByModule.entries()]
+    .map(([label, stores]) => ({ label, value: stores.size }))
     .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, "es"));
 }
 
@@ -560,16 +611,19 @@ function groupSubmissions(rows) {
 
     if (current) {
       current.count += 1;
+      current.rows.push(row);
       continue;
     }
 
     groups.set(key, {
+      key,
       submittedAt: row.submittedAt,
       submittedAtDisplay: row.submittedAtDisplay,
       module: row.module || "",
       promotora: row.promotora || "",
       tienda: row.tienda || "",
       count: 1,
+      rows: [row],
       submittedAtSortValue: row.submittedAtSortValue,
     });
   }
@@ -585,7 +639,7 @@ function renderDailyChart(svgElement, series) {
   if (!svgElement) return;
 
   if (!series.length) {
-    svgElement.innerHTML = renderEmptyChartSvg("Sin registros en este rango.");
+    svgElement.innerHTML = renderEmptyChartSvg("Sin tiendas visitadas en este rango.");
     return;
   }
 
@@ -597,9 +651,11 @@ function renderDailyChart(svgElement, series) {
   const maxValue = Math.max(...series.map((item) => item.value), 1);
   const gridValues = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(maxValue * ratio));
   const step = series.length > 1 ? chartWidth / (series.length - 1) : 0;
+  const bubbleWidth = 116;
+  const bubbleHeight = 34;
 
   const points = series.map((item, index) => {
-    const x = padding.left + step * index;
+    const x = series.length === 1 ? padding.left + chartWidth / 2 : padding.left + step * index;
     const y = padding.top + chartHeight - (item.value / maxValue) * chartHeight;
     return { ...item, x, y };
   });
@@ -608,6 +664,11 @@ function renderDailyChart(svgElement, series) {
 
   const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
   const areaPath = buildAreaPath(points, padding.top + chartHeight, padding.left);
+  const peakBubbleX = peakPoint
+    ? Math.max(padding.left + 8, Math.min(width - padding.right - bubbleWidth, peakPoint.x - bubbleWidth / 2))
+    : 0;
+  const peakBubbleCenterX = peakBubbleX + bubbleWidth / 2;
+  const peakBubbleY = peakPoint ? Math.max(8, peakPoint.y - 54) : 0;
 
   svgElement.innerHTML = `
     <defs>
@@ -646,9 +707,9 @@ function renderDailyChart(svgElement, series) {
     ${
       peakPoint
         ? `
-          <rect x="${Math.max(padding.left, peakPoint.x - 52)}" y="${Math.max(8, peakPoint.y - 54)}" width="104" height="34" rx="10" fill="rgba(31, 42, 36, 0.88)" />
-          <text x="${peakPoint.x}" y="${Math.max(30, peakPoint.y - 33)}" text-anchor="middle" fill="#fffdf8" font-size="10">${escapeSvgText(shortDateLabel(peakPoint.label))}</text>
-          <text x="${peakPoint.x}" y="${Math.max(44, peakPoint.y - 18)}" text-anchor="middle" fill="#fffdf8" font-size="12" font-weight="700">${formatNumber(peakPoint.value)} registros</text>
+          <rect x="${peakBubbleX}" y="${peakBubbleY}" width="${bubbleWidth}" height="${bubbleHeight}" rx="10" fill="rgba(31, 42, 36, 0.88)" />
+          <text x="${peakBubbleCenterX}" y="${peakBubbleY + 12}" text-anchor="middle" fill="#fffdf8" font-size="10">${escapeSvgText(shortDateLabel(peakPoint.label))}</text>
+          <text x="${peakBubbleCenterX}" y="${peakBubbleY + 27}" text-anchor="middle" fill="#fffdf8" font-size="12" font-weight="700">${formatNumber(peakPoint.value)} tiendas</text>
         `
         : ""
     }
@@ -659,7 +720,7 @@ function renderModuleChart(svgElement, series) {
   if (!svgElement) return;
 
   if (!series.length) {
-    svgElement.innerHTML = renderEmptyChartSvg("Sin registros en este rango.");
+    svgElement.innerHTML = renderEmptyChartSvg("Sin tiendas activas en este rango.");
     return;
   }
 
@@ -696,7 +757,7 @@ function renderModuleChart(svgElement, series) {
         <g transform="translate(218, ${54 + index * 64})">
           <rect x="0" y="0" width="12" height="12" rx="4" fill="${HISTORY_COLORS.series[index % HISTORY_COLORS.series.length]}" />
           <text x="18" y="11" fill="${HISTORY_COLORS.text}" font-size="12" font-weight="700">${escapeSvgText(item.label)}</text>
-          <text x="18" y="30" fill="${HISTORY_COLORS.muted}" font-size="11">${formatNumber(item.value)} registros · ${formatPercent(item.value / total)}</text>
+          <text x="18" y="30" fill="${HISTORY_COLORS.muted}" font-size="11">${formatNumber(item.value)} tiendas · ${formatPercent(item.value / total)}</text>
         </g>
       `,
     )
@@ -707,7 +768,7 @@ function renderModuleChart(svgElement, series) {
     ${segments.join("")}
     <circle cx="${centerX}" cy="${centerY}" r="${radius - 30}" fill="${HISTORY_COLORS.bg}" />
     <text x="${centerX}" y="${centerY - 2}" text-anchor="middle" fill="${HISTORY_COLORS.text}" font-size="28" font-weight="700">${formatNumber(total)}</text>
-    <text x="${centerX}" y="${centerY + 20}" text-anchor="middle" fill="${HISTORY_COLORS.muted}" font-size="11">registros</text>
+    <text x="${centerX}" y="${centerY + 20}" text-anchor="middle" fill="${HISTORY_COLORS.muted}" font-size="11">tiendas</text>
     ${legend}
   `;
 }
@@ -806,6 +867,13 @@ function normalizeHistoryRow(row) {
     numeroTienda: String(row.numeroTienda || row.NumeroTienda || "").trim(),
     sku: String(row.sku || row.SKU || "").trim(),
     producto: String(row.producto || row.product || row.Nombre_Producto || "").trim(),
+    inventory: String(row.inventory || row.inventario || row.Inventario || "").trim(),
+    ddiActuales: String(row.ddiActuales || row.DDI_Actuales || "").trim(),
+    cajasSugeridas: String(row.cajasSugeridas || row.Cajas_Sugueridas || "").trim(),
+    fechaPorxVisita: String(row.fechaPorxVisita || row.FechaPorxVisita || "").trim(),
+    regularPrice: String(row.regularPrice || row.PrecioRegular || "").trim(),
+    promoPrice: String(row.promoPrice || row.PrecioOferta || "").trim(),
+    offerUntil: String(row.offerUntil || row.OfertaHasta || "").trim(),
   };
 }
 
@@ -845,6 +913,12 @@ function formatHistoryTimestamp(value) {
   return timePart ? `${formattedDate} ${timePart.slice(0, 5)}` : formattedDate;
 }
 
+function formatHistoryDateOnly(value) {
+  if (!value) return "-";
+  const parsedDate = parseHistoryDate(value);
+  return parsedDate ? formatDateLabel(formatDateInput(parsedDate)) : String(value);
+}
+
 function shortDateLabel(value) {
   const [year, month, day] = String(value).split("-");
   if (!year || !month || !day) {
@@ -879,6 +953,216 @@ function getPromotoraLabel(row) {
 
 function getStoreLabel(row) {
   return row.tienda || "Sin tienda";
+}
+
+function applyHistoryRoleScope(rows) {
+  const access = getHistoryAccessContext();
+
+  if (access.canViewAll) {
+    return rows;
+  }
+
+  if (access.role === "promotora" && access.displayName) {
+    return rows.filter((row) => normalizeHistoryText(getPromotoraLabel(row)) === normalizeHistoryText(access.displayName));
+  }
+
+  if (access.displayName) {
+    return rows.filter((row) => normalizeHistoryText(getPromotoraLabel(row)) === normalizeHistoryText(access.displayName));
+  }
+
+  return [];
+}
+
+function getHistoryAccessContext() {
+  const authUser = getHistorySessionUser();
+  const role = normalizeHistoryText(authUser?.role || "");
+
+  return {
+    authUser,
+    role,
+    displayName: String(authUser?.displayName || "").trim(),
+    canViewAll: role === "master" || role === "admin",
+  };
+}
+
+function getHistorySessionUser() {
+  const runtimeUser = window.HIT_GTA_RUNTIME?.authUser;
+  if (runtimeUser && typeof runtimeUser === "object") {
+    return runtimeUser;
+  }
+
+  const sessionKey = window.HIT_GTA_CONFIG?.sessionStorageKey || "hit-gta-session";
+  const rawSession = sessionStorage.getItem(sessionKey);
+  if (!rawSession) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawSession);
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeHistoryText(value) {
+  return String(value || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function handleHistoryTableClick(event) {
+  const row = event.target instanceof Element ? event.target.closest(".history-table-row") : null;
+  if (!row) {
+    return;
+  }
+
+  const submissionKey = row.getAttribute("data-submission-key") || "";
+  openHistoryDetail(submissionKey);
+}
+
+function handleHistoryTableKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const row = event.target instanceof Element ? event.target.closest(".history-table-row") : null;
+  if (!row) {
+    return;
+  }
+
+  event.preventDefault();
+  const submissionKey = row.getAttribute("data-submission-key") || "";
+  openHistoryDetail(submissionKey);
+}
+
+function handleHistoryDetailOverlayClick(event) {
+  if (event.target === HISTORY_ELEMENTS.detailOverlay) {
+    closeHistoryDetail();
+  }
+}
+
+function openHistoryDetail(submissionKey) {
+  const submission = HISTORY_STATE.groupedSubmissions.find((entry) => entry.key === submissionKey);
+  if (!submission || !HISTORY_ELEMENTS.detailOverlay || !HISTORY_ELEMENTS.detailBody) {
+    return;
+  }
+
+  if (HISTORY_ELEMENTS.detailTitle) {
+    HISTORY_ELEMENTS.detailTitle.textContent = submission.module || "Evento";
+  }
+
+  if (HISTORY_ELEMENTS.detailSubtitle) {
+    HISTORY_ELEMENTS.detailSubtitle.textContent =
+      `${submission.submittedAtDisplay || "-"} · ${submission.promotora || "Sin promotora"} · ${submission.tienda || "Sin tienda"}`;
+  }
+
+  HISTORY_ELEMENTS.detailBody.innerHTML = renderHistoryDetailContent(submission);
+  HISTORY_ELEMENTS.detailOverlay.classList.remove("is-hidden");
+}
+
+function closeHistoryDetail() {
+  HISTORY_ELEMENTS.detailOverlay?.classList.add("is-hidden");
+}
+
+function renderHistoryDetailContent(submission) {
+  const detailRows = [...submission.rows].sort(
+    (left, right) => left.producto.localeCompare(right.producto, "es") || left.sku.localeCompare(right.sku, "es"),
+  );
+  const summaryCards = `
+    <div class="history-detail-summary">
+      <article class="history-detail-stat">
+        <strong>Modulo</strong>
+        <span>${escapeHtml(submission.module || "-")}</span>
+      </article>
+      <article class="history-detail-stat">
+        <strong>Promotora</strong>
+        <span>${escapeHtml(submission.promotora || "Sin promotora")}</span>
+      </article>
+      <article class="history-detail-stat">
+        <strong>Tienda</strong>
+        <span>${escapeHtml(submission.tienda || "Sin tienda")}</span>
+      </article>
+      <article class="history-detail-stat">
+        <strong>Registros</strong>
+        <span>${formatNumber(submission.count)}</span>
+      </article>
+    </div>
+  `;
+
+  const copy = `<p class="history-detail-copy">Detalle de los productos capturados en este envio.</p>`;
+  const table = submission.module === "Promociones"
+    ? renderPromotionDetailTable(detailRows)
+    : renderInventoryDetailTable(detailRows);
+
+  return `${summaryCards}${copy}${table}`;
+}
+
+function renderInventoryDetailTable(rows) {
+  return `
+    <div class="table-scroll history-detail-table">
+      <table>
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Producto</th>
+            <th>Inventario</th>
+            <th>Sugerido</th>
+            <th>Prox. visita</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.sku || "-")}</td>
+                  <td>${escapeHtml(row.producto || "-")}</td>
+                  <td>${escapeHtml(row.inventory || "-")}</td>
+                  <td>${escapeHtml(row.cajasSugeridas || "-")}</td>
+                  <td>${escapeHtml(formatHistoryDateOnly(row.fechaPorxVisita))}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderPromotionDetailTable(rows) {
+  return `
+    <div class="table-scroll history-detail-table">
+      <table>
+        <thead>
+          <tr>
+            <th>SKU</th>
+            <th>Producto</th>
+            <th>Regular</th>
+            <th>Oferta</th>
+            <th>Hasta</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.sku || "-")}</td>
+                  <td>${escapeHtml(row.producto || "-")}</td>
+                  <td>${escapeHtml(row.regularPrice || "-")}</td>
+                  <td>${escapeHtml(row.promoPrice || "-")}</td>
+                  <td>${escapeHtml(formatHistoryDateOnly(row.offerUntil))}</td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function parseHistoryDate(value) {

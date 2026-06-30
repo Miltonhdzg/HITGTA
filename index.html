@@ -269,12 +269,12 @@
             <div class="history-card-head">
               <div>
                 <p class="loading-kicker">Tendencia</p>
-                <strong>Registros por dia</strong>
+                <strong>Tiendas visitadas por dia</strong>
               </div>
               <span id="history-chart-daily-note" class="history-chart-note"></span>
             </div>
             <div class="history-chart-frame">
-              <svg id="history-daily-chart" viewBox="0 0 640 240" role="img" aria-label="Grafica de registros por dia"></svg>
+              <svg id="history-daily-chart" viewBox="0 0 640 240" role="img" aria-label="Grafica de tiendas visitadas por dia"></svg>
             </div>
           </article>
 
@@ -343,6 +343,21 @@
             </table>
           </div>
         </section>
+
+        <div id="history-detail-overlay" class="confirm-overlay is-hidden" aria-live="polite">
+          <div class="receipt-dialog history-detail-dialog">
+            <div class="receipt-dialog-header history-detail-header">
+              <div>
+                <p class="loading-kicker">Detalle del envio</p>
+                <strong id="history-detail-title">Evento</strong>
+                <p id="history-detail-subtitle" class="history-detail-subtitle"></p>
+              </div>
+              <button id="history-detail-close" class="confirm-button confirm-button-muted" type="button">Cerrar</button>
+            </div>
+
+            <div id="history-detail-body" class="history-detail-body"></div>
+          </div>
+        </div>
       </section>
     </main>
 

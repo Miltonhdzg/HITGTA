@@ -12,6 +12,8 @@ const HISTORY_STATE = {
   pendingReject: null,
 };
 
+const HISTORY_LOAD_TIMEOUT_MS = 30000;
+
 const HISTORY_ELEMENTS = {
   screen: document.querySelector("#history-module"),
   status: document.querySelector("#history-status"),
@@ -20,7 +22,9 @@ const HISTORY_ELEMENTS = {
   startDate: document.querySelector("#history-range-start"),
   endDate: document.querySelector("#history-range-end"),
   moduleFilter: document.querySelector("#history-module-filter"),
+  promotoraFilter: document.querySelector("#history-promotora-filter"),
   storeFilter: document.querySelector("#history-store-filter"),
+  filterSummary: document.querySelector("#history-filter-summary"),
   totalRecords: document.querySelector("#history-total-records"),
   totalSubmissions: document.querySelector("#history-total-submissions"),
   totalStores: document.querySelector("#history-total-stores"),
@@ -28,9 +32,11 @@ const HISTORY_ELEMENTS = {
   dailyNote: document.querySelector("#history-chart-daily-note"),
   moduleNote: document.querySelector("#history-chart-module-note"),
   storeNote: document.querySelector("#history-chart-store-note"),
+  promotoraNote: document.querySelector("#history-chart-promotora-note"),
   dailyChart: document.querySelector("#history-daily-chart"),
   moduleChart: document.querySelector("#history-module-chart"),
   storeChart: document.querySelector("#history-store-chart"),
+  promotoraChart: document.querySelector("#history-promotora-chart"),
   tableBody: document.querySelector("#history-table-body"),
 };
 
@@ -71,13 +77,15 @@ function bindHistoryEvents() {
 
   HISTORY_ELEMENTS.clearButton?.addEventListener("click", () => {
     configureHistoryFilters();
+    syncHistoryFilterOptions();
     renderHistory();
   });
 
-  HISTORY_ELEMENTS.startDate?.addEventListener("change", renderHistory);
-  HISTORY_ELEMENTS.endDate?.addEventListener("change", renderHistory);
-  HISTORY_ELEMENTS.moduleFilter?.addEventListener("change", renderHistory);
-  HISTORY_ELEMENTS.storeFilter?.addEventListener("change", renderHistory);
+  HISTORY_ELEMENTS.startDate?.addEventListener("change", handleHistoryFilterChange);
+  HISTORY_ELEMENTS.endDate?.addEventListener("change", handleHistoryFilterChange);
+  HISTORY_ELEMENTS.moduleFilter?.addEventListener("change", handleHistoryFilterChange);
+  HISTORY_ELEMENTS.promotoraFilter?.addEventListener("change", handleHistoryFilterChange);
+  HISTORY_ELEMENTS.storeFilter?.addEventListener("change", handleHistoryFilterChange);
 }
 
 function configureHistoryFilters() {
@@ -92,6 +100,23 @@ function configureHistoryFilters() {
   if (HISTORY_ELEMENTS.endDate) {
     HISTORY_ELEMENTS.endDate.value = formatDateInput(today);
   }
+
+  if (HISTORY_ELEMENTS.moduleFilter) {
+    HISTORY_ELEMENTS.moduleFilter.value = "";
+  }
+
+  if (HISTORY_ELEMENTS.promotoraFilter) {
+    HISTORY_ELEMENTS.promotoraFilter.value = "";
+  }
+
+  if (HISTORY_ELEMENTS.storeFilter) {
+    HISTORY_ELEMENTS.storeFilter.value = "";
+  }
+}
+
+function handleHistoryFilterChange() {
+  syncHistoryFilterOptions();
+  renderHistory();
 }
 
 async function loadHistory() {
@@ -110,15 +135,61 @@ async function loadHistory() {
   setHistoryStatus("Cargando historial...");
 
   try {
-    await requestHistoryFrame(appsScriptUrl);
+    const payload = await requestHistoryData(appsScriptUrl);
+    applyHistoryPayload(payload);
   } catch (error) {
-    console.error(error);
-    HISTORY_STATE.loaded = false;
-    HISTORY_STATE.error = error instanceof Error ? error.message : "No se pudo cargar el historial.";
-    setHistoryStatus(HISTORY_STATE.error, "error");
-    renderHistory([]);
+    console.error("No se pudo cargar el historial por fetch. Intentando fallback por iframe.", error);
+
+    try {
+      await requestHistoryFrame(appsScriptUrl);
+    } catch (fallbackError) {
+      console.error(fallbackError);
+      HISTORY_STATE.loaded = false;
+      HISTORY_STATE.error = fallbackError instanceof Error ? fallbackError.message : "No se pudo cargar el historial.";
+      setHistoryStatus(HISTORY_STATE.error, "error");
+      renderHistory([]);
+    }
   } finally {
     HISTORY_STATE.loading = false;
+  }
+}
+
+async function requestHistoryData(appsScriptUrl) {
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort();
+  }, HISTORY_LOAD_TIMEOUT_MS);
+
+  try {
+    const historyUrl = new URL(appsScriptUrl);
+    historyUrl.searchParams.set("action", "history");
+    historyUrl.searchParams.set("requestId", requestId);
+    historyUrl.searchParams.set("ts", String(Date.now()));
+
+    const response = await fetch(historyUrl.toString(), {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`No se pudo consultar el historial (${response.status}).`);
+    }
+
+    const payload = await response.json();
+    if (payload && !payload.requestId) {
+      payload.requestId = requestId;
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Tiempo de espera agotado al consultar el historial.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
@@ -141,9 +212,13 @@ function requestHistoryFrame(appsScriptUrl) {
     HISTORY_STATE.loadTimeoutId = window.setTimeout(() => {
       if (HISTORY_STATE.pendingRequestId === requestId) {
         cleanupHistoryFrame();
-        reject(new Error("Tiempo de espera agotado al consultar el historial."));
+        reject(
+          new Error(
+            "Tiempo de espera agotado al consultar el historial. Verifica que el Web App publicado use la version mas reciente del Apps Script.",
+          ),
+        );
       }
-    }, 15000);
+    }, HISTORY_LOAD_TIMEOUT_MS);
 
     document.body.appendChild(frame);
   });
@@ -151,10 +226,6 @@ function requestHistoryFrame(appsScriptUrl) {
 
 function handleHistoryMessage(event) {
   if (!event?.data || event.data.type !== "hit-gta-history") {
-    return;
-  }
-
-  if (event.source !== HISTORY_STATE.activeFrame?.contentWindow) {
     return;
   }
 
@@ -167,26 +238,12 @@ function handleHistoryMessage(event) {
   const reject = HISTORY_STATE.pendingReject;
   cleanupHistoryFrame();
 
-  if (!payload.ok || !Array.isArray(payload.rows)) {
-    const message = payload.message || "No se pudo leer el historial.";
-    HISTORY_STATE.loaded = false;
-    HISTORY_STATE.error = message;
-    setHistoryStatus(message, "error");
-    renderHistory([]);
-    reject?.(new Error(message));
-    return;
+  try {
+    applyHistoryPayload(payload);
+    resolve?.();
+  } catch (error) {
+    reject?.(error instanceof Error ? error : new Error("No se pudo leer el historial."));
   }
-
-  HISTORY_STATE.rows = payload.rows.map(normalizeHistoryRow).filter((row) => row.submittedAt);
-  HISTORY_STATE.loaded = true;
-  HISTORY_STATE.error = "";
-  HISTORY_STATE.lastLoadedAt = new Date().toLocaleTimeString("es-MX", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  populateHistoryStoreFilter();
-  renderHistory();
-  resolve?.();
 }
 
 function cleanupHistoryFrame() {
@@ -203,6 +260,27 @@ function cleanupHistoryFrame() {
   HISTORY_STATE.pendingReject = null;
 }
 
+function applyHistoryPayload(payload) {
+  if (!payload?.ok || !Array.isArray(payload.rows)) {
+    const message = payload?.message || "No se pudo leer el historial.";
+    HISTORY_STATE.loaded = false;
+    HISTORY_STATE.error = message;
+    setHistoryStatus(message, "error");
+    renderHistory([]);
+    throw new Error(message);
+  }
+
+  HISTORY_STATE.rows = payload.rows.map(normalizeHistoryRow).filter((row) => row.submittedAt);
+  HISTORY_STATE.loaded = true;
+  HISTORY_STATE.error = "";
+  HISTORY_STATE.lastLoadedAt = new Date().toLocaleTimeString("es-MX", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  syncHistoryFilterOptions();
+  renderHistory();
+}
+
 function renderHistory(rows = HISTORY_STATE.rows) {
   const filteredRows = applyHistoryFilters(rows);
   HISTORY_STATE.filteredRows = filteredRows;
@@ -211,13 +289,24 @@ function renderHistory(rows = HISTORY_STATE.rows) {
   const dailySeries = buildDailySeries(filteredRows);
   const moduleSeries = buildModuleSeries(filteredRows);
   const storeSeries = buildStoreSeries(filteredRows);
+  const promotoraSeries = buildPromotoraSeries(filteredRows);
 
   updateSummaryCards(filteredRows, groupedSubmissions);
   renderDailyChart(HISTORY_ELEMENTS.dailyChart, dailySeries);
   renderModuleChart(HISTORY_ELEMENTS.moduleChart, moduleSeries);
-  renderStoreChart(HISTORY_ELEMENTS.storeChart, storeSeries);
+  renderRankingChart(HISTORY_ELEMENTS.storeChart, storeSeries, {
+    accentColor: HISTORY_COLORS.brand,
+    trackColor: "rgba(15, 118, 110, 0.08)",
+    emptyMessage: "Sin tiendas activas en este rango.",
+  });
+  renderRankingChart(HISTORY_ELEMENTS.promotoraChart, promotoraSeries, {
+    accentColor: HISTORY_COLORS.accent,
+    trackColor: "rgba(239, 182, 79, 0.16)",
+    emptyMessage: "Sin promotoras activas en este rango.",
+  });
   renderSubmissionTable(groupedSubmissions);
-  renderChartNotes(dailySeries, moduleSeries, storeSeries, filteredRows.length);
+  renderChartNotes(dailySeries, moduleSeries, storeSeries, promotoraSeries, filteredRows.length);
+  renderFilterSummary(filteredRows, groupedSubmissions);
 
   if (HISTORY_STATE.error) {
     setHistoryStatus(HISTORY_STATE.error, "error");
@@ -235,19 +324,55 @@ function renderHistory(rows = HISTORY_STATE.rows) {
 }
 
 function applyHistoryFilters(rows) {
-  const startValue = HISTORY_ELEMENTS.startDate?.value || "";
-  const endValue = HISTORY_ELEMENTS.endDate?.value || "";
-  const moduleValue = HISTORY_ELEMENTS.moduleFilter?.value || "";
-  const storeValue = HISTORY_ELEMENTS.storeFilter?.value || "";
+  const filters = getHistorySelectedFilters();
+  return rows.filter((row) => matchesHistoryRow(row, filters));
+}
 
-  return rows.filter((row) => {
-    const rowDate = getDateKey(row.submittedAt);
-    if (startValue && rowDate < startValue) return false;
-    if (endValue && rowDate > endValue) return false;
-    if (moduleValue && row.module !== moduleValue) return false;
-    if (storeValue && row.tienda !== storeValue) return false;
-    return true;
-  });
+function getHistorySelectedFilters() {
+  return {
+    start: HISTORY_ELEMENTS.startDate?.value || "",
+    end: HISTORY_ELEMENTS.endDate?.value || "",
+    module: HISTORY_ELEMENTS.moduleFilter?.value || "",
+    promotora: HISTORY_ELEMENTS.promotoraFilter?.value || "",
+    store: HISTORY_ELEMENTS.storeFilter?.value || "",
+  };
+}
+
+function matchesHistoryRow(row, filters, options = {}) {
+  const rowDate = row.submittedAtDateKey || "";
+
+  if (filters.start && rowDate < filters.start) return false;
+  if (filters.end && rowDate > filters.end) return false;
+  if (!options.ignoreModule && filters.module && row.module !== filters.module) return false;
+  if (!options.ignorePromotora && filters.promotora && getPromotoraLabel(row) !== filters.promotora) return false;
+  if (!options.ignoreStore && filters.store && getStoreLabel(row) !== filters.store) return false;
+  return true;
+}
+
+function syncHistoryFilterOptions() {
+  populateHistoryPromotoraFilter();
+  populateHistoryStoreFilter();
+}
+
+function populateHistoryPromotoraFilter() {
+  if (!HISTORY_ELEMENTS.promotoraFilter) {
+    return;
+  }
+
+  const current = HISTORY_ELEMENTS.promotoraFilter.value;
+  const filters = getHistorySelectedFilters();
+  const promotoraValues = uniqueValues(
+    HISTORY_STATE.rows
+      .filter((row) => matchesHistoryRow(row, filters, { ignorePromotora: true }))
+      .map(getPromotoraLabel),
+  );
+
+  HISTORY_ELEMENTS.promotoraFilter.innerHTML = '<option value="">Todas</option>';
+  for (const promotora of promotoraValues) {
+    HISTORY_ELEMENTS.promotoraFilter.append(new Option(promotora, promotora));
+  }
+
+  HISTORY_ELEMENTS.promotoraFilter.value = promotoraValues.includes(current) ? current : "";
 }
 
 function populateHistoryStoreFilter() {
@@ -256,7 +381,12 @@ function populateHistoryStoreFilter() {
   }
 
   const current = HISTORY_ELEMENTS.storeFilter.value;
-  const storeValues = uniqueValues(HISTORY_STATE.rows.map((row) => row.tienda));
+  const filters = getHistorySelectedFilters();
+  const storeValues = uniqueValues(
+    HISTORY_STATE.rows
+      .filter((row) => matchesHistoryRow(row, filters, { ignoreStore: true }))
+      .map(getStoreLabel),
+  );
 
   HISTORY_ELEMENTS.storeFilter.innerHTML = '<option value="">Todas</option>';
   for (const store of storeValues) {
@@ -287,21 +417,53 @@ function updateSummaryCards(filteredRows, groupedSubmissions) {
   }
 }
 
-function renderChartNotes(dailySeries, moduleSeries, storeSeries, totalRows) {
+function renderChartNotes(dailySeries, moduleSeries, storeSeries, promotoraSeries, totalRows) {
   if (HISTORY_ELEMENTS.dailyNote) {
-    HISTORY_ELEMENTS.dailyNote.textContent = `${dailySeries.length} dias`;
+    const peakDay = getPeakSeriesItem(dailySeries);
+    HISTORY_ELEMENTS.dailyNote.textContent = peakDay
+      ? `${dailySeries.length} dias · pico ${shortDateLabel(peakDay.label)}`
+      : `${dailySeries.length} dias`;
   }
 
   if (HISTORY_ELEMENTS.moduleNote) {
-    const total = moduleSeries.reduce((sum, item) => sum + item.value, 0);
-    HISTORY_ELEMENTS.moduleNote.textContent = total ? `${formatNumber(total)} registros` : "Sin datos";
+    const leader = moduleSeries[0];
+    HISTORY_ELEMENTS.moduleNote.textContent = leader
+      ? `${leader.label} lidera con ${formatNumber(leader.value)}`
+      : "Sin datos";
   }
 
   if (HISTORY_ELEMENTS.storeNote) {
-    HISTORY_ELEMENTS.storeNote.textContent = storeSeries.length
-      ? `${formatNumber(totalRows)} registros`
+    const leader = storeSeries[0];
+    HISTORY_ELEMENTS.storeNote.textContent = leader
+      ? `${truncateLabel(leader.label, 22)} · ${formatNumber(leader.value)}`
       : "Sin datos";
   }
+
+  if (HISTORY_ELEMENTS.promotoraNote) {
+    const leader = promotoraSeries[0];
+    HISTORY_ELEMENTS.promotoraNote.textContent = leader
+      ? `${truncateLabel(leader.label, 22)} · ${formatNumber(leader.value)}`
+      : totalRows
+        ? "Sin promotora"
+        : "Sin datos";
+  }
+}
+
+function renderFilterSummary(filteredRows, groupedSubmissions) {
+  if (!HISTORY_ELEMENTS.filterSummary) {
+    return;
+  }
+
+  const filters = getHistorySelectedFilters();
+  const activeLabels = [];
+
+  if (filters.module) activeLabels.push(`Modulo: ${filters.module}`);
+  if (filters.promotora) activeLabels.push(`Promotora: ${filters.promotora}`);
+  if (filters.store) activeLabels.push(`Tienda: ${filters.store}`);
+
+  const baseSummary = activeLabels.length ? activeLabels.join(" · ") : "Sin filtros adicionales";
+  const rangeSummary = `${formatNumber(filteredRows.length)} registros en ${formatNumber(groupedSubmissions.length)} envios`;
+  HISTORY_ELEMENTS.filterSummary.textContent = `${baseSummary} · ${rangeSummary}.`;
 }
 
 function renderSubmissionTable(groupedSubmissions) {
@@ -323,7 +485,7 @@ function renderSubmissionTable(groupedSubmissions) {
     .map(
       (entry) => `
         <tr>
-          <td data-label="Fecha">${escapeHtml(formatHistoryTimestamp(entry.submittedAt))}</td>
+          <td data-label="Fecha">${escapeHtml(entry.submittedAtDisplay || formatHistoryTimestamp(entry.submittedAt))}</td>
           <td data-label="Modulo">${escapeHtml(entry.module || "-")}</td>
           <td data-label="Promotora">${escapeHtml(entry.promotora || "-")}</td>
           <td data-label="Tienda">${escapeHtml(entry.tienda || "-")}</td>
@@ -338,7 +500,7 @@ function buildDailySeries(rows) {
   const counts = new Map();
 
   for (const row of rows) {
-    const dateKey = getDateKey(row.submittedAt);
+    const dateKey = row.submittedAtDateKey || "";
     if (!dateKey) continue;
     counts.set(dateKey, (counts.get(dateKey) || 0) + 1);
   }
@@ -365,7 +527,7 @@ function buildStoreSeries(rows) {
   const counts = new Map();
 
   for (const row of rows) {
-    const key = row.tienda || "Sin tienda";
+    const key = getStoreLabel(row);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
 
@@ -375,11 +537,25 @@ function buildStoreSeries(rows) {
     .slice(0, 5);
 }
 
+function buildPromotoraSeries(rows) {
+  const counts = new Map();
+
+  for (const row of rows) {
+    const key = getPromotoraLabel(row);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .map(([label, value]) => ({ label, value }))
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label, "es"))
+    .slice(0, 6);
+}
+
 function groupSubmissions(rows) {
   const groups = new Map();
 
   for (const row of rows) {
-    const key = [row.submittedAt, row.module, row.promotora, row.tienda].join("|");
+    const key = [row.submittedAtGroupKey, row.module, row.promotora, row.tienda].join("|");
     const current = groups.get(key);
 
     if (current) {
@@ -389,14 +565,20 @@ function groupSubmissions(rows) {
 
     groups.set(key, {
       submittedAt: row.submittedAt,
+      submittedAtDisplay: row.submittedAtDisplay,
       module: row.module || "",
       promotora: row.promotora || "",
       tienda: row.tienda || "",
       count: 1,
+      submittedAtSortValue: row.submittedAtSortValue,
     });
   }
 
-  return [...groups.values()].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt));
+  return [...groups.values()].sort(
+    (left, right) =>
+      (right.submittedAtSortValue || 0) - (left.submittedAtSortValue || 0) ||
+      String(right.submittedAt || "").localeCompare(String(left.submittedAt || "")),
+  );
 }
 
 function renderDailyChart(svgElement, series) {
@@ -413,6 +595,7 @@ function renderDailyChart(svgElement, series) {
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   const maxValue = Math.max(...series.map((item) => item.value), 1);
+  const gridValues = [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(maxValue * ratio));
   const step = series.length > 1 ? chartWidth / (series.length - 1) : 0;
 
   const points = series.map((item, index) => {
@@ -421,6 +604,7 @@ function renderDailyChart(svgElement, series) {
     return { ...item, x, y };
   });
   const labelStep = Math.max(1, Math.ceil(points.length / 8));
+  const peakPoint = points.reduce((top, point) => (!top || point.value > top.value ? point : top), null);
 
   const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
   const areaPath = buildAreaPath(points, padding.top + chartHeight, padding.left);
@@ -433,7 +617,15 @@ function renderDailyChart(svgElement, series) {
       </linearGradient>
     </defs>
     <rect x="0" y="0" width="640" height="240" rx="24" fill="${HISTORY_COLORS.bg}" />
-    <line x1="${padding.left}" y1="${padding.top + chartHeight}" x2="${width - padding.right}" y2="${padding.top + chartHeight}" stroke="${HISTORY_COLORS.line}" />
+    ${gridValues
+      .map((value) => {
+        const y = padding.top + chartHeight - (value / maxValue) * chartHeight;
+        return `
+          <line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="${HISTORY_COLORS.line}" stroke-dasharray="4 6" />
+          <text x="${padding.left - 6}" y="${y + 4}" text-anchor="end" fill="${HISTORY_COLORS.muted}" font-size="10">${formatNumber(value)}</text>
+        `;
+      })
+      .join("")}
     <path d="${areaPath}" fill="url(#history-daily-fill)" />
     <polyline points="${linePoints}" fill="none" stroke="${HISTORY_COLORS.brand}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
     ${points
@@ -451,6 +643,15 @@ function renderDailyChart(svgElement, series) {
         `,
       )
       .join("")}
+    ${
+      peakPoint
+        ? `
+          <rect x="${Math.max(padding.left, peakPoint.x - 52)}" y="${Math.max(8, peakPoint.y - 54)}" width="104" height="34" rx="10" fill="rgba(31, 42, 36, 0.88)" />
+          <text x="${peakPoint.x}" y="${Math.max(30, peakPoint.y - 33)}" text-anchor="middle" fill="#fffdf8" font-size="10">${escapeSvgText(shortDateLabel(peakPoint.label))}</text>
+          <text x="${peakPoint.x}" y="${Math.max(44, peakPoint.y - 18)}" text-anchor="middle" fill="#fffdf8" font-size="12" font-weight="700">${formatNumber(peakPoint.value)} registros</text>
+        `
+        : ""
+    }
   `;
 }
 
@@ -465,7 +666,7 @@ function renderModuleChart(svgElement, series) {
   const total = series.reduce((sum, item) => sum + item.value, 0);
   const radius = 72;
   const circumference = 2 * Math.PI * radius;
-  const centerX = 160;
+  const centerX = 104;
   const centerY = 96;
   let offset = 0;
 
@@ -492,17 +693,17 @@ function renderModuleChart(svgElement, series) {
   const legend = series
     .map(
       (item, index) => `
-        <g transform="translate(40, 178)">
-          <rect x="${index * 92}" y="0" width="12" height="12" rx="4" fill="${HISTORY_COLORS.series[index % HISTORY_COLORS.series.length]}" />
-          <text x="${index * 92 + 18}" y="11" fill="${HISTORY_COLORS.text}" font-size="12">${escapeSvgText(item.label)}</text>
-          <text x="${index * 92 + 18}" y="29" fill="${HISTORY_COLORS.muted}" font-size="11">${formatNumber(item.value)} registros</text>
+        <g transform="translate(218, ${54 + index * 64})">
+          <rect x="0" y="0" width="12" height="12" rx="4" fill="${HISTORY_COLORS.series[index % HISTORY_COLORS.series.length]}" />
+          <text x="18" y="11" fill="${HISTORY_COLORS.text}" font-size="12" font-weight="700">${escapeSvgText(item.label)}</text>
+          <text x="18" y="30" fill="${HISTORY_COLORS.muted}" font-size="11">${formatNumber(item.value)} registros · ${formatPercent(item.value / total)}</text>
         </g>
       `,
     )
     .join("");
 
   svgElement.innerHTML = `
-    <rect x="0" y="0" width="320" height="240" rx="24" fill="${HISTORY_COLORS.bg}" />
+    <rect x="0" y="0" width="420" height="240" rx="24" fill="${HISTORY_COLORS.bg}" />
     ${segments.join("")}
     <circle cx="${centerX}" cy="${centerY}" r="${radius - 30}" fill="${HISTORY_COLORS.bg}" />
     <text x="${centerX}" y="${centerY - 2}" text-anchor="middle" fill="${HISTORY_COLORS.text}" font-size="28" font-weight="700">${formatNumber(total)}</text>
@@ -511,21 +712,24 @@ function renderModuleChart(svgElement, series) {
   `;
 }
 
-function renderStoreChart(svgElement, series) {
+function renderRankingChart(svgElement, series, options = {}) {
   if (!svgElement) return;
 
   if (!series.length) {
-    svgElement.innerHTML = renderEmptyChartSvg("Sin registros en este rango.");
+    svgElement.innerHTML = renderEmptyChartSvg(options.emptyMessage || "Sin registros en este rango.");
     return;
   }
 
   const width = 640;
   const height = 260;
-  const padding = { top: 20, right: 22, bottom: 24, left: 140 };
+  const padding = { top: 20, right: 46, bottom: 24, left: 176 };
   const barHeight = 22;
   const gap = 14;
   const chartWidth = width - padding.left - padding.right;
   const maxValue = Math.max(...series.map((item) => item.value), 1);
+  const total = series.reduce((sum, item) => sum + item.value, 0);
+  const accentColor = options.accentColor || HISTORY_COLORS.brand;
+  const trackColor = options.trackColor || "rgba(15, 118, 110, 0.08)";
 
   svgElement.innerHTML = `
     <rect x="0" y="0" width="640" height="260" rx="24" fill="${HISTORY_COLORS.bg}" />
@@ -534,10 +738,13 @@ function renderStoreChart(svgElement, series) {
         const y = padding.top + index * (barHeight + gap);
         const barWidth = (item.value / maxValue) * chartWidth;
         return `
-          <text x="18" y="${y + 16}" fill="${HISTORY_COLORS.text}" font-size="12" font-weight="600">${escapeSvgText(truncateLabel(item.label, 18))}</text>
-          <rect x="${padding.left}" y="${y}" width="${chartWidth}" height="${barHeight}" rx="12" fill="rgba(15, 118, 110, 0.08)" />
-          <rect x="${padding.left}" y="${y}" width="${barWidth}" height="${barHeight}" rx="12" fill="${HISTORY_COLORS.brand}" />
-          <text x="${padding.left + barWidth + 10}" y="${y + 16}" fill="${HISTORY_COLORS.muted}" font-size="12">${formatNumber(item.value)}</text>
+          <circle cx="28" cy="${y + 11}" r="12" fill="${index === 0 ? accentColor : "rgba(31, 42, 36, 0.08)"}" />
+          <text x="28" y="${y + 15}" text-anchor="middle" fill="${index === 0 ? "#fffdf8" : HISTORY_COLORS.text}" font-size="11" font-weight="700">${index + 1}</text>
+          <text x="52" y="${y + 12}" fill="${HISTORY_COLORS.text}" font-size="12" font-weight="700">${escapeSvgText(truncateLabel(item.label, 24))}</text>
+          <text x="52" y="${y + 28}" fill="${HISTORY_COLORS.muted}" font-size="11">${formatPercent(item.value / total)} del rango</text>
+          <rect x="${padding.left}" y="${y}" width="${chartWidth}" height="${barHeight}" rx="12" fill="${trackColor}" />
+          <rect x="${padding.left}" y="${y}" width="${barWidth}" height="${barHeight}" rx="12" fill="${accentColor}" />
+          <text x="${Math.min(width - 14, padding.left + barWidth + 10)}" y="${y + 16}" fill="${HISTORY_COLORS.muted}" font-size="12">${formatNumber(item.value)}</text>
         `;
       })
       .join("")}
@@ -584,10 +791,17 @@ function getHistoryEndpointUrl() {
 }
 
 function normalizeHistoryRow(row) {
+  const submittedAtRaw = String(row.submittedAt || row.sentAt || row.fecha || row.Fecha || "").trim();
+  const submittedAtDate = parseHistoryDate(submittedAtRaw);
+
   return {
-    submittedAt: String(row.submittedAt || row.sentAt || row.fecha || row.Fecha || ""),
+    submittedAt: submittedAtRaw,
+    submittedAtDateKey: submittedAtDate ? formatDateInput(submittedAtDate) : "",
+    submittedAtDisplay: submittedAtDate ? formatHistoryDateTime(submittedAtDate) : submittedAtRaw,
+    submittedAtGroupKey: submittedAtDate ? formatHistoryDateTimeKey(submittedAtDate) : submittedAtRaw,
+    submittedAtSortValue: submittedAtDate ? submittedAtDate.getTime() : 0,
     module: String(row.module || row.modulo || row.target || "").trim(),
-    promotora: String(row.promotora || row.Promotora || "").trim(),
+    promotora: String(row.promotora || row.Promotora || row.Promotoria || "").trim(),
     tienda: String(row.tienda || row.Tienda || row.nombreTienda || row.NombreTienda || "").trim(),
     numeroTienda: String(row.numeroTienda || row.NumeroTienda || "").trim(),
     sku: String(row.sku || row.SKU || "").trim(),
@@ -600,8 +814,8 @@ function uniqueValues(values) {
 }
 
 function getDateKey(value) {
-  if (!value) return "";
-  return String(value).slice(0, 10);
+  const parsedDate = parseHistoryDate(value);
+  return parsedDate ? formatDateInput(parsedDate) : "";
 }
 
 function formatDateInput(date) {
@@ -621,6 +835,11 @@ function formatDateLabel(dateValue) {
 
 function formatHistoryTimestamp(value) {
   if (!value) return "-";
+  const parsedDate = parseHistoryDate(value);
+  if (parsedDate) {
+    return formatHistoryDateTime(parsedDate);
+  }
+
   const [datePart, timePart = ""] = String(value).split(" ");
   const formattedDate = formatDateLabel(datePart);
   return timePart ? `${formattedDate} ${timePart.slice(0, 5)}` : formattedDate;
@@ -641,6 +860,68 @@ function truncateLabel(label, maxLength) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat("es-MX").format(value);
+}
+
+function formatPercent(value) {
+  return new Intl.NumberFormat("es-MX", {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function getPeakSeriesItem(series) {
+  return series.reduce((peak, item) => (!peak || item.value > peak.value ? item : peak), null);
+}
+
+function getPromotoraLabel(row) {
+  return row.promotora || "Sin promotora";
+}
+
+function getStoreLabel(row) {
+  return row.tienda || "Sin tienda";
+}
+
+function parseHistoryDate(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  const rawValue = String(value).trim();
+  if (!rawValue) {
+    return null;
+  }
+
+  const isoMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (isoMatch) {
+    const [, year, month, day, hours = "00", minutes = "00", seconds = "00"] = isoMatch;
+    const parsedIsoDate = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hours),
+      Number(minutes),
+      Number(seconds),
+    );
+
+    if (!Number.isNaN(parsedIsoDate.getTime())) {
+      return parsedIsoDate;
+    }
+  }
+
+  const cleanedValue = rawValue.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+  const parsedDate = new Date(cleanedValue);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function formatHistoryDateTime(date) {
+  const dateLabel = formatDateInput(date);
+  return `${formatDateLabel(dateLabel)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatHistoryDateTimeKey(date) {
+  return `${formatDateInput(date)} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`;
 }
 
 function setHistoryStatus(message, tone = "") {

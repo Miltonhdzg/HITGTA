@@ -131,7 +131,18 @@ function createHistoryFrameResponse(payload) {
     "<html>",
     "<body>",
     "<script>",
-    "window.parent.postMessage({ type: 'hit-gta-history', payload: " + json + " }, '*');",
+    "(function() {",
+    "var message = { type: 'hit-gta-history', payload: " + json + " };",
+    "var targets = [];",
+    "if (window.parent) targets.push(window.parent);",
+    "if (window.parent && window.parent.parent && window.parent.parent !== window.parent) targets.push(window.parent.parent);",
+    "if (window.top && targets.indexOf(window.top) === -1) targets.push(window.top);",
+    "for (var index = 0; index < targets.length; index += 1) {",
+    "  try {",
+    "    targets[index].postMessage(message, '*');",
+    "  } catch (error) {}",
+    "}",
+    "}());",
     "</script>",
     "<p>Historial enviado.</p>",
     "</body>",
@@ -171,7 +182,7 @@ function readInventarioHistoryRows(spreadsheet) {
     return {
       submittedAt: getCellValue(row, headers, ["fecha"]),
       module: "Inventario",
-      promotora: getCellValue(row, headers, ["promotoria"]),
+      promotora: getCellValue(row, headers, ["promotora", "promotoria"]),
       tienda: getCellValue(row, headers, ["nombre_tienda", "nombre de la tienda"]),
       numeroTienda: getCellValue(row, headers, ["numero_tienda", "numero tienda", "numerotienda"]),
       sku: getCellValue(row, headers, ["sku"]),
@@ -205,8 +216,8 @@ function readPromocionesHistoryRows(spreadsheet) {
     return {
       submittedAt: getCellValue(row, headers, ["fecha"]),
       module: "Promociones",
-      promotora: getCellValue(row, headers, ["promotora"]),
-      tienda: getCellValue(row, headers, ["nombretienda", "nombre tienda"]),
+      promotora: getCellValue(row, headers, ["promotora", "promotoria"]),
+      tienda: getCellValue(row, headers, ["nombretienda", "nombre_tienda", "nombre tienda", "nombre de la tienda"]),
       numeroTienda: getCellValue(row, headers, ["numerotienda", "numero tienda"]),
       sku: getCellValue(row, headers, ["sku"]),
       producto: getCellValue(row, headers, ["descripcion", "producto", "nombre_producto"]),
@@ -248,6 +259,12 @@ function normalizeHeader(value) {
 function normalizeCell(value) {
   if (value === null || value === undefined) {
     return "";
+  }
+
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value.getTime())) {
+    var timeZone = Session.getScriptTimeZone() || "America/Monterrey";
+    var hasTime = value.getHours() || value.getMinutes() || value.getSeconds();
+    return Utilities.formatDate(value, timeZone, hasTime ? "yyyy-MM-dd HH:mm:ss" : "yyyy-MM-dd");
   }
 
   return String(value).trim();

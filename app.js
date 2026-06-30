@@ -8,7 +8,7 @@ const USERS_SOURCE = {
   url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SpyknHHgm6sGvWzKHWaven_gc_9H2HI_q-5jlhPfB9bHaxmlp_k_fjct3FyuH4J_R6z0ZIxyW3IE/pub?gid=113947866&single=true&output=csv",
 };
 
-const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwWHq5sUwTED5BbBuvoJv9lI8Z8k2VOhxahIOw8e6Wzbk5uawk_TYA3tIu2s7bUAcK2/exec";
+const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyXWJ3OnqpQ85T6gUf26xD5WIVAHqMnOIwR8a4ifgc0xMCznFudcmfaWTmGrnu69gPO/exec";
 const STORE_CHECK_PAGE_SIZE = 30;
 const SESSION_STORAGE_KEY = "hit-gta-session";
 

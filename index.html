@@ -191,7 +191,7 @@
           <div>
             <p class="eyebrow">Analitica de uso</p>
             <h1>Historial y uso</h1>
-            <p class="hero-copy">Consulta un resumen de todo lo enviado y revisa como se mueve la actividad por fecha, modulo y tienda.</p>
+            <p class="hero-copy">Consulta un resumen de todo lo enviado y revisa como se mueve la actividad por fecha, modulo, promotora y tienda.</p>
           </div>
           <div id="history-session-host" class="hero-session-host"></div>
         </section>
@@ -217,6 +217,13 @@
           </div>
 
           <div class="field">
+            <label for="history-promotora-filter">Promotora</label>
+            <select id="history-promotora-filter">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="field">
             <label for="history-store-filter">Tienda</label>
             <select id="history-store-filter">
               <option value="">Todas</option>
@@ -227,6 +234,8 @@
             <button id="history-refresh" type="button">Actualizar</button>
             <button id="history-clear-filters" type="button">Limpiar</button>
           </div>
+
+          <p id="history-filter-summary" class="history-filter-summary">Sin filtros adicionales.</p>
         </section>
 
         <section class="history-summary-grid" aria-label="Resumen de historial">
@@ -278,7 +287,7 @@
               <span id="history-chart-module-note" class="history-chart-note"></span>
             </div>
             <div class="history-chart-frame history-chart-frame-donut">
-              <svg id="history-module-chart" viewBox="0 0 320 240" role="img" aria-label="Distribucion por modulo"></svg>
+              <svg id="history-module-chart" viewBox="0 0 420 240" role="img" aria-label="Distribucion por modulo"></svg>
             </div>
           </article>
 
@@ -292,6 +301,19 @@
             </div>
             <div class="history-chart-frame">
               <svg id="history-store-chart" viewBox="0 0 640 260" role="img" aria-label="Grafica de tiendas con mas movimiento"></svg>
+            </div>
+          </article>
+
+          <article class="table-card history-chart-card">
+            <div class="history-card-head">
+              <div>
+                <p class="loading-kicker">Seguimiento</p>
+                <strong>Promotoras con mas registros</strong>
+              </div>
+              <span id="history-chart-promotora-note" class="history-chart-note"></span>
+            </div>
+            <div class="history-chart-frame">
+              <svg id="history-promotora-chart" viewBox="0 0 640 260" role="img" aria-label="Grafica de promotoras con mas registros"></svg>
             </div>
           </article>
         </section>

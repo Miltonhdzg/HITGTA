@@ -75,6 +75,12 @@
             <strong>Store Check</strong>
             <span class="module-copy">Captura precio regular y precio promocion por producto.</span>
           </button>
+
+          <button class="module-card module-card-history" type="button" data-module-target="history-module">
+            <span class="module-kicker">Modulo 03</span>
+            <strong>Historial y uso</strong>
+            <span class="module-copy">Resume lo enviado, muestra volumen por dia y destaca tendencias.</span>
+          </button>
         </section>
       </section>
 
@@ -179,6 +185,143 @@
           </div>
         </section>
       </section>
+
+      <section id="history-module" class="module-screen is-hidden">
+        <section class="hero hero-history hero-module">
+          <div>
+            <p class="eyebrow">Analitica de uso</p>
+            <h1>Historial y uso</h1>
+            <p class="hero-copy">Consulta un resumen de todo lo enviado y revisa como se mueve la actividad por fecha, modulo y tienda.</p>
+          </div>
+          <div id="history-session-host" class="hero-session-host"></div>
+        </section>
+
+        <section class="filters-card history-controls" aria-label="Filtros de historial">
+          <div class="field">
+            <label for="history-range-start">Desde</label>
+            <input id="history-range-start" type="date" />
+          </div>
+
+          <div class="field">
+            <label for="history-range-end">Hasta</label>
+            <input id="history-range-end" type="date" />
+          </div>
+
+          <div class="field">
+            <label for="history-module-filter">Modulo</label>
+            <select id="history-module-filter">
+              <option value="">Todos</option>
+              <option value="Inventario">Inventario</option>
+              <option value="Promociones">Promociones</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="history-store-filter">Tienda</label>
+            <select id="history-store-filter">
+              <option value="">Todas</option>
+            </select>
+          </div>
+
+          <div class="history-control-actions">
+            <button id="history-refresh" type="button">Actualizar</button>
+            <button id="history-clear-filters" type="button">Limpiar</button>
+          </div>
+        </section>
+
+        <section class="history-summary-grid" aria-label="Resumen de historial">
+          <article class="history-stat-card history-stat-card-strong">
+            <p class="history-stat-label">Registros filtrados</p>
+            <strong id="history-total-records">0</strong>
+            <span id="history-total-records-copy">Filas enviadas en el rango actual.</span>
+          </article>
+
+          <article class="history-stat-card">
+            <p class="history-stat-label">Envios agrupados</p>
+            <strong id="history-total-submissions">0</strong>
+            <span id="history-total-submissions-copy">Agrupados por fecha, modulo y tienda.</span>
+          </article>
+
+          <article class="history-stat-card">
+            <p class="history-stat-label">Tiendas activas</p>
+            <strong id="history-total-stores">0</strong>
+            <span id="history-total-stores-copy">Tiendas diferentes con actividad.</span>
+          </article>
+
+          <article class="history-stat-card">
+            <p class="history-stat-label">Promotoras activas</p>
+            <strong id="history-total-promotoria">0</strong>
+            <span id="history-total-promotoria-copy">Promotoras con registros en el periodo.</span>
+          </article>
+        </section>
+
+        <section class="history-charts-grid" aria-label="Graficas de uso">
+          <article class="table-card history-chart-card">
+            <div class="history-card-head">
+              <div>
+                <p class="loading-kicker">Tendencia</p>
+                <strong>Registros por dia</strong>
+              </div>
+              <span id="history-chart-daily-note" class="history-chart-note"></span>
+            </div>
+            <div class="history-chart-frame">
+              <svg id="history-daily-chart" viewBox="0 0 640 240" role="img" aria-label="Grafica de registros por dia"></svg>
+            </div>
+          </article>
+
+          <article class="table-card history-chart-card">
+            <div class="history-card-head">
+              <div>
+                <p class="loading-kicker">Distribucion</p>
+                <strong>Inventario vs Promociones</strong>
+              </div>
+              <span id="history-chart-module-note" class="history-chart-note"></span>
+            </div>
+            <div class="history-chart-frame history-chart-frame-donut">
+              <svg id="history-module-chart" viewBox="0 0 320 240" role="img" aria-label="Distribucion por modulo"></svg>
+            </div>
+          </article>
+
+          <article class="table-card history-chart-card">
+            <div class="history-card-head">
+              <div>
+                <p class="loading-kicker">Actividad</p>
+                <strong>Tiendas con mas movimiento</strong>
+              </div>
+              <span id="history-chart-store-note" class="history-chart-note"></span>
+            </div>
+            <div class="history-chart-frame">
+              <svg id="history-store-chart" viewBox="0 0 640 260" role="img" aria-label="Grafica de tiendas con mas movimiento"></svg>
+            </div>
+          </article>
+        </section>
+
+        <section class="table-card history-table-card">
+          <div class="table-header">
+            <div class="header-side header-side-left">
+              <p class="history-table-label">Ultimos envios agrupados</p>
+            </div>
+            <div class="header-side header-side-right">
+              <p id="history-status" class="submission-status history-status"></p>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Modulo</th>
+                  <th>Promotora</th>
+                  <th>Tienda</th>
+                  <th>Registros</th>
+                </tr>
+              </thead>
+              <tbody id="history-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </main>
 
     <div id="loading-overlay" class="loading-overlay is-hidden" aria-live="polite" aria-busy="true">
@@ -258,6 +401,13 @@
       <input id="payload-input" name="payload" type="hidden" />
     </form>
 
+    <script>
+      window.HIT_GTA_CONFIG = {
+        appsScriptWebAppUrl: "https://script.google.com/macros/s/AKfycbwWHq5sUwTED5BbBuvoJv9lI8Z8k2VOhxahIOw8e6Wzbk5uawk_TYA3tIu2s7bUAcK2/exec",
+        sessionStorageKey: "hit-gta-session",
+      };
+    </script>
     <script src="./app.js" type="module"></script>
+    <script src="./history-module.js" type="module"></script>
   </body>
 </html>

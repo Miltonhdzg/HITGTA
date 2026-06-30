@@ -9,12 +9,14 @@ Base inicial de una web pensada para telefonos moviles.
 - Llena listas desplegables unicas para `Promotoria`, `Nombre de la tienda` y `Familia`.
 - Filtra la tabla de productos.
 - Muestra la columna `Venta Promedio Dia`.
+- Incluye un modulo 3 con resumen de historial y graficas de uso.
 
 ## Archivos
 
 - `index.html`: estructura principal.
 - `styles.css`: estilos mobile-first.
 - `app.js`: carga de datos, filtros y renderizado.
+- `history-module.js`: resumen de historial, filtros y graficas.
 - `Code.gs`: recibe envios y los guarda en la hoja `Inventario`.
 - `data/catalogo-muestra.csv`: muestra local para desarrollo.
 
@@ -139,3 +141,15 @@ Fecha | Promotora | NumeroTienda | NombreTienda | Descripcion | SKU | PrecioRegu
 ```
 
 La app enviara solo filas visibles donde haya por lo menos un precio o una fecha capturada.
+
+## Modulo 3: Historial y uso
+
+El modulo `Historial y uso` consulta el mismo Web App de Apps Script con `?action=history` para leer el contenido de `Inventario` y `Promociones`.
+
+Si haces cambios en la estructura de esas hojas, mantén al menos estos encabezados:
+
+- `Fecha`
+- `Promotora`
+- `Numero_Tienda` o `NumeroTienda`
+- `Nombre_Tienda` o `NombreTienda`
+- `SKU`

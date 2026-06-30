@@ -8,9 +8,14 @@ const USERS_SOURCE = {
   url: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS4SpyknHHgm6sGvWzKHWaven_gc_9H2HI_q-5jlhPfB9bHaxmlp_k_fjct3FyuH4J_R6z0ZIxyW3IE/pub?gid=113947866&single=true&output=csv",
 };
 
-const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxkv6P9wHWRtY7_psFy5xzJlBaR4IiqQpomtsNdCrY3Wf13UE8eonkyIQ_8712W3ZIY/exec";
+const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwWHq5sUwTED5BbBuvoJv9lI8Z8k2VOhxahIOw8e6Wzbk5uawk_TYA3tIu2s7bUAcK2/exec";
 const STORE_CHECK_PAGE_SIZE = 30;
 const SESSION_STORAGE_KEY = "hit-gta-session";
+
+window.HIT_GTA_CONFIG = window.HIT_GTA_CONFIG || {
+  appsScriptWebAppUrl: APPS_SCRIPT_WEB_APP_URL,
+  sessionStorageKey: SESSION_STORAGE_KEY,
+};
 
 const COLUMN_MAP = {
   promotoria: ["Promotoria", "Promotor"],
@@ -55,6 +60,7 @@ const elements = {
   homeSessionHost: document.querySelector("#home-session-host"),
   hitGtaSessionHost: document.querySelector("#hit-gta-session-host"),
   storeCheckSessionHost: document.querySelector("#store-check-session-host"),
+  historySessionHost: document.querySelector("#history-session-host"),
   homeStoreSelect: document.querySelector("#home-store-select"),
   homeSelectionStatus: document.querySelector("#home-selection-status"),
   sessionUser: document.querySelector("#session-user"),
@@ -186,6 +192,10 @@ function showModule(moduleId) {
     screen.classList.toggle("is-hidden", screen.id !== moduleId);
   });
   setSessionAction("home");
+
+  if (moduleId === "history-module" && window.HistoryModule?.load) {
+    window.HistoryModule.load();
+  }
 }
 
 function showLoginScreen() {
@@ -728,6 +738,10 @@ function getSessionBarHostForModule(moduleId) {
 
   if (moduleId === "store-check-module") {
     return elements.storeCheckSessionHost;
+  }
+
+  if (moduleId === "history-module") {
+    return elements.historySessionHost;
   }
 
   return elements.sessionBarHost;
